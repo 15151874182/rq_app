@@ -575,7 +575,7 @@ def main(args):
         each=args.money/len(df)
         df['买卖数量']=df['买卖价格'].apply(lambda close:int(each//(close*100)*100))
         df['买卖方向']='买入'
-        df=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
+        res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
         # cash = {'证券代码': 'CNY', '买卖数量': '700000', '买卖价格': 1, '买卖方向': '划入'}            
         # cash=pd.DataFrame([cash])
         # res=pd.concat([cash,df2])   
@@ -586,28 +586,24 @@ def main(args):
         now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
         path=f'./PMS_csv/{acc}_{now}.xlsx'  
         with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
-            df.to_excel(writer, sheet_name='导入数据区', index=False)   
+            res.to_excel(writer, sheet_name='导入数据区', index=False)   
             print(f'save to {path}')
-            # res3=res[['证券代码']]
-            # res3.rename(columns={'证券代码': 'id'}, inplace=True)
-            # res3=pd.merge(res3,stock_info,on='id',how='inner')
-            # res3=res3[['id','name']]
-            # res3.to_excel(writer, sheet_name='股票名清单', index=False)      
-        xx=1
+            res2=df[['id','name']]
+            res2.to_excel(writer, sheet_name='股票名清单', index=False)      
         
     ####rq_wpg_adjust_ATX 根据ATX的实时监控.xlsx和米筐的微盘股目标仓位，生成csv，用于ATX 调仓
     if args.task=='rq_wpg_adjust_ATX':  
         print('rq_wpg_adjust_ATX...')
         
         df1=pd.read_excel(args.ATX_pos_file,dtype={'证券代码': str}) ##现有持仓
-        df2=pd.read_excel(args.trade_log_file, sheet_name='导入数据区') ##目标持仓
+        df2=pd.read_excel(args.pms_file, sheet_name='导入数据区') ##目标持仓
         
         df1['证券市场']=df1['交易市场'].apply(lambda x:'SZ' if x=='深交所' else 'SH')
         df1['证券代码']=df1['证券代码']+'.'+df1['证券市场']
         df1['当前拥股']=df1['持仓数量']
         df1=df1[['证券代码','当前拥股']]
         
-        df2=df2.iloc[1:,:]
+        # df2=df2.iloc[1:,:]
         df2=df2[['证券代码','买卖数量']]
         df2.columns=['证券代码','目标拥股']        
         df=pd.merge(df1,df2,on='证券代码',how='outer')
@@ -631,9 +627,10 @@ def main(args):
         df['其他参数']=np.nan
         df['交易市场']=np.nan
         
-        xx=stock_info[['id','name']]
-        xx.columns=['证券代码','证券名称']
-        df=pd.merge(df,xx,on='证券代码',how='left')
+        # xx=stock_info[['id','name']]
+        # xx.columns=['证券代码','证券名称']
+        # df=pd.merge(df,xx,on='证券代码',how='left')
+        df=df.reset_index()
         
         columns=['算法类型',
                 '账户名称',
@@ -650,6 +647,7 @@ def main(args):
         df=df[columns]
         
         df.to_csv(args.ATX_file,index=False)
+        print(f'save to {args.ATX_file}')
     ####exp 日常实验
     if args.task=='exp':   
         ##微盘股和中证2000
@@ -1181,15 +1179,15 @@ if __name__ == '__main__':
     # args.et=rqdatac.get_latest_trading_date()
     # args.file='signal/wpg_macd_pred.csv'
     
-    args.task='rq_wpg_make_pms_csv'
-    args.et=rqdatac.get_latest_trading_date()
-    args.money=200e4
+    # args.task='rq_wpg_make_pms_csv'
+    # args.et=rqdatac.get_latest_trading_date()
+    # args.money=200e4
     
-    # args.task='rq_wpg_adjust_ATX'
-    # args.ATX_pos_file='ATX_csv/持仓查询_20250411150745.xlsx'
-    # args.trade_log_file='trade_log/acc1_2025-02-23-22-05-59.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-02-24_1.csv'
-    # args.start_time='20250224T093000000'
-    # args.end_time=  '20250224T103000000'  
+    args.task='rq_wpg_adjust_ATX'
+    args.ATX_pos_file='ATX_csv/持仓查询_20250411150745.xlsx'
+    args.pms_file='PMS_csv/绝对收益信用_2025-04-11.xlsx'
+    args.ATX_file='ATX_csv/ATX_stock_2025-04-13_1.csv'
+    args.start_time='20250413T093000000'
+    args.end_time=  '20250413T103000000'  
     
     main(args)
