@@ -23,6 +23,7 @@ from rqalpha_plus import *
 from rqalpha.apis import *
 import rqalpha
 import rqalpha_mod_fund
+from rqoptimizer import *
 import talib
 rqdatac.init()
 
@@ -305,26 +306,26 @@ def main(args):
             '综合', '综合金融'         # 多元化业务
         ]        
         
-        dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
-        inputs=[] ##存每天的股票清单
-        for date in tqdm(dates):
-            st=rqdatac.get_previous_trading_date(date,n=5,market='cn')
-            et=rqdatac.get_previous_trading_date(date,n=1,market='cn')
+        # dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
+        # inputs=[] ##存每天的股票清单
+        # for date in tqdm(dates):
+        #     st=rqdatac.get_previous_trading_date(date,n=5,market='cn')
+        #     et=rqdatac.get_previous_trading_date(date,n=1,market='cn')
        
-            implicit=rqdatac.get_factor_return(st, et, 
-                              factors= None, universe='whole_market',
-                              method='implicit',industry_mapping='citics_2019', model = 'v2')
-            explicit=rqdatac.get_factor_return(st, et, 
-                              factors= None, universe='whole_market',
-                              method='explicit',industry_mapping='citics_2019', model = 'v2')
+        #     implicit=rqdatac.get_factor_return(st, et, 
+        #                       factors= None, universe='whole_market',
+        #                       method='implicit',industry_mapping='citics_2019', model = 'v2')
+        #     explicit=rqdatac.get_factor_return(st, et, 
+        #                       factors= None, universe='whole_market',
+        #                       method='explicit',industry_mapping='citics_2019', model = 'v2')
         
-            ##要用显式因子收益率（多空组合算出来的）+行业因子收益率（显式没有这个），拼起来
-            factor_return=pd.concat([explicit[cols_risk_factor],implicit[cols_industry_factor]],axis=1)
+        #     ##要用显式因子收益率（多空组合算出来的）+行业因子收益率（显式没有这个），拼起来
+        #     factor_return=pd.concat([explicit[cols_risk_factor],implicit[cols_industry_factor]],axis=1)
             
-            ##对因子按天远近加权
-            daily_weights=General.sum_normalize([i for i in range(1,len(factor_return)+1)])
-            daily_weights = pd.Series(daily_weights, index=factor_return.index)
-            factor_return_weighted = factor_return.multiply(daily_weights, axis=0)
+        #     ##对因子按天远近加权
+        #     daily_weights=General.sum_normalize([i for i in range(1,len(factor_return)+1)])
+        #     daily_weights = pd.Series(daily_weights, index=factor_return.index)
+        #     factor_return_weighted = factor_return.multiply(daily_weights, axis=0)
         
         # ########factor_return_map画图
         # # factor_return=pd.concat([factor_return[cols_risk_factor],
@@ -373,73 +374,73 @@ def main(args):
         # #                                 maxmin=False)
         
             ########factor_return sharp 筛选策略
-            res=factor_return_weighted.describe()
-            res=res.T
-            res['sharp']=res['mean']/res['std'] ##计算因子收益率sharp
-            res['abs_sharp']=abs(res['sharp']) ##非常负的风险因子收益率也是一种市场风格偏向，要看绝对值
-            risk_part,industry_part=General.split_dataframe_by_index(res)
+        #     res=factor_return_weighted.describe()
+        #     res=res.T
+        #     res['sharp']=res['mean']/res['std'] ##计算因子收益率sharp
+        #     res['abs_sharp']=abs(res['sharp']) ##非常负的风险因子收益率也是一种市场风格偏向，要看绝对值
+        #     risk_part,industry_part=General.split_dataframe_by_index(res)
             
             
-            risk_part=risk_part.sort_values(['abs_sharp'],ascending=False)
-            risk_part=risk_part[risk_part['abs_sharp']>0.5] 
-            industry_part=industry_part[industry_part['sharp']>0] 
-            industry_part=industry_part.sort_values(['sharp'],ascending=False)
+        #     risk_part=risk_part.sort_values(['abs_sharp'],ascending=False)
+        #     risk_part=risk_part[risk_part['abs_sharp']>0.5] 
+        #     industry_part=industry_part[industry_part['sharp']>0] 
+        #     industry_part=industry_part.sort_values(['sharp'],ascending=False)
             
             
-            factor_return_array = []
-            for risk in risk_part.index:
-                for industry in industry_part.index:
-                    x1,y1=risk_part['sharp'][risk],risk_part['abs_sharp'][risk]
-                    x2=industry_part['sharp'][industry]
-                    factor_return_array.append([risk,industry,x1,y1,x2,y1+x2])
-            factor_return_array=pd.DataFrame(factor_return_array,columns = ['risk', 'industry', 'risk_sharp', 'risk_abs_sharp', 'industry_sharp', 'sum_sharp'])
-            risk_industry_sharp=factor_return_array.sort_values(['sum_sharp'],ascending=False)
+        #     factor_return_array = []
+        #     for risk in risk_part.index:
+        #         for industry in industry_part.index:
+        #             x1,y1=risk_part['sharp'][risk],risk_part['abs_sharp'][risk]
+        #             x2=industry_part['sharp'][industry]
+        #             factor_return_array.append([risk,industry,x1,y1,x2,y1+x2])
+        #     factor_return_array=pd.DataFrame(factor_return_array,columns = ['risk', 'industry', 'risk_sharp', 'risk_abs_sharp', 'industry_sharp', 'sum_sharp'])
+        #     risk_industry_sharp=factor_return_array.sort_values(['sum_sharp'],ascending=False)
             
-            stock_industry_dict={}
-            stock_pool_list=[]
-            for industry in industry_part.index:
-                stocks=rqdatac.get_industry(industry=industry, source='citics_2019', date=None, market='cn')
-                stock_pool_list+=stocks
-                for stock in stocks:
-                    stock_industry_dict[stock]=industry
-            exposures=rqdatac.get_factor_exposure(stock_pool_list,st,et,factors=None,industry_mapping='citics_2019', model = 'v2')
+        #     stock_industry_dict={}
+        #     stock_pool_list=[]
+        #     for industry in industry_part.index:
+        #         stocks=rqdatac.get_industry(industry=industry, source='citics_2019', date=None, market='cn')
+        #         stock_pool_list+=stocks
+        #         for stock in stocks:
+        #             stock_industry_dict[stock]=industry
+        #     exposures=rqdatac.get_factor_exposure(stock_pool_list,st,et,factors=None,industry_mapping='citics_2019', model = 'v2')
             
-            group = exposures.groupby(level=1)
-            stocks_score=[]
-            for id,item in group:
-                item=item[risk_part.index]
-                item_weighted = item.multiply(daily_weights, axis=0)
-                exposure=item_weighted.sum()
-                industry=stock_industry_dict[id] ##查找该stock对应industry
-                info=risk_industry_sharp[risk_industry_sharp['industry']==industry]
-                info['exposure']=list(exposure)
-                stock_score=sum(info['risk_sharp']*info['exposure']+info['industry_sharp']*abs(info['exposure']))
-                stocks_score.append([id,stock_score])
-            stocks_score=pd.DataFrame(stocks_score,columns=['id','score'])
-            stocks_score=stocks_score.sort_values(['score'],ascending=False)
-            stocks_score['name']=stocks_score['id'].apply(lambda id:rqdatac.instruments(id, market='cn').symbol)
-            stocks_score=stocks_score.reset_index()
-            stocks_score=stocks_score[~stocks_score['name'].str.contains('ST')] ##去掉st的
-            stocks_score=stocks_score[stocks_score['score']>0] ##去掉负分的
+        #     group = exposures.groupby(level=1)
+        #     stocks_score=[]
+        #     for id,item in group:
+        #         item=item[risk_part.index]
+        #         item_weighted = item.multiply(daily_weights, axis=0)
+        #         exposure=item_weighted.sum()
+        #         industry=stock_industry_dict[id] ##查找该stock对应industry
+        #         info=risk_industry_sharp[risk_industry_sharp['industry']==industry]
+        #         info['exposure']=list(exposure)
+        #         stock_score=sum(info['risk_sharp']*info['exposure']+info['industry_sharp']*abs(info['exposure']))
+        #         stocks_score.append([id,stock_score])
+        #     stocks_score=pd.DataFrame(stocks_score,columns=['id','score'])
+        #     stocks_score=stocks_score.sort_values(['score'],ascending=False)
+        #     stocks_score['name']=stocks_score['id'].apply(lambda id:rqdatac.instruments(id, market='cn').symbol)
+        #     stocks_score=stocks_score.reset_index()
+        #     stocks_score=stocks_score[~stocks_score['name'].str.contains('ST')] ##去掉st的
+        #     stocks_score=stocks_score[stocks_score['score']>0] ##去掉负分的
         
-            select=stocks_score.iloc[:args.k]
-            k=len(select)
-            print(k)
-            if k!=0: ##市场太差，存在筛选是空的
-                select['TRADE_DT']=date.strftime('%Y%m%d')
-                select['TARGET_WEIGHT']=1/k
-                select=select[['TRADE_DT','id','name','TARGET_WEIGHT']]
-                select.columns=['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']
-                inputs.append(select)
-            else:
-                select=copy.deepcopy(inputs[-1])
-                # select['TARGET_WEIGHT']=0
-                select['TRADE_DT']=date.strftime('%Y%m%d')
-                inputs.append(select)
-            xx=1
-        inputs=pd.concat(inputs,axis=0)
-        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
-            inputs.to_excel(writer, sheet_name='', index=False)                  
+        #     select=stocks_score.iloc[:args.k]
+        #     k=len(select)
+        #     print(k)
+        #     if k!=0: ##市场太差，存在筛选是空的
+        #         select['TRADE_DT']=date.strftime('%Y%m%d')
+        #         select['TARGET_WEIGHT']=1/k
+        #         select=select[['TRADE_DT','id','name','TARGET_WEIGHT']]
+        #         select.columns=['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']
+        #         inputs.append(select)
+        #     else:
+        #         select=copy.deepcopy(inputs[-1])
+        #         # select['TARGET_WEIGHT']=0
+        #         select['TRADE_DT']=date.strftime('%Y%m%d')
+        #         inputs.append(select)
+        #     xx=1
+        # inputs=pd.concat(inputs,axis=0)
+        # with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+        #     inputs.to_excel(writer, sheet_name='', index=False)                  
                 
             
         # select['买卖价格']=select['id'].apply(lambda id:rqdatac.get_price(order_book_ids=id, 
@@ -465,36 +466,50 @@ def main(args):
         #     res3=select[['id','name']]
         #     res3.to_excel(writer, sheet_name='股票名清单', index=False)      
 
-        # inputs=[]
-        # st=args.st
-        # et=args.et
-        # dates=rqdatac.get_trading_dates(st, et, market='cn')
-        # is_suspendeds=[]
-        # for date in tqdm(dates):
-        #     weights=rqdatac.index_weights(order_book_id='866006.RI', date=date)
-        #     weights=weights.reset_index()
-        #     weights.columns=['TICKER','TARGET_WEIGHT']
-        #     weights['TRADE_DT']=date.strftime('%Y%m%d')
-        #     weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
-        #     weights['close']=list(rqdatac.get_price(order_book_ids=list(weights['TICKER']), 
-        #               start_date=date, 
-        #               end_date=date, 
-        #               frequency='1d', 
-        #               fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-        #               expect_df=True,time_slice=None)['close'])
-        #     weights['TARGET_WEIGHT']=weights['close']/sum(weights['close'])
-        #     weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
-        #     is_suspendeds+=list(weights['TICKER'])
-        #     inputs.append(weights)
+        inputs=[]
+        st=args.st
+        et=args.et
+        dates=rqdatac.get_trading_dates(st, et, market='cn')
+        is_suspendeds=[]
+        for date in tqdm(dates[::args.f]): ##args.f是回测频率
+            weights=rqdatac.index_weights(order_book_id='866006.RI', date=date)
+            weights=weights.reset_index()
+            weights.columns=['TICKER','TARGET_WEIGHT']
+            ##组合优化
+            # new_weight=portfolio_optimize(order_book_ids=list(weights['TICKER']), 
+            #                    date=date, 
+            #                    objective= MaxSharpeRatio(window=30), 
+            #                    bnds={'*': (0.002, 0.02)}, 
+            #                    cons=None, 
+            #                    benchmark=None, 
+            #                    cov_model=CovModel.FACTOR_MODEL_DAILY)
+            # new_weight=new_weight.reset_index()
+            # new_weight.columns=['TICKER','new_weight']            
+            # merged = pd.merge(weights, new_weight, on='TICKER')
+            # weights['TARGET_WEIGHT'] = merged['new_weight']
+
+            weights['TRADE_DT']=date.strftime('%Y%m%d')
+            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
+            weights['close']=list(rqdatac.get_price(order_book_ids=list(weights['TICKER']), 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)['close'])
+            weights['TARGET_WEIGHT']=weights['close']/sum(weights['close'])
+            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
+            is_suspendeds+=list(weights['TICKER'])
+            inputs.append(weights)
         
-        # inputs=pd.concat(inputs,axis=0)
-        # with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
-        #     inputs.to_excel(writer, sheet_name='', index=False)  
-        
-        # is_suspendeds_df=pd.DataFrame(set(is_suspendeds),columns=['id'])
-        # is_suspended_df=rqdatac.is_suspended(list(is_suspendeds_df['id']), start_date=st,end_date=et)
-        # is_suspended_df.to_csv('config/is_suspended_df.csv') 
-        # is_suspended_df=pd.read_csv(r'config/is_suspended_df.csv',index_col=0,parse_dates=True)
+        inputs=pd.concat(inputs,axis=0)
+        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+            inputs.to_excel(writer, sheet_name='', index=False)  
+            print(f'save to {args.file}')
+            
+        is_suspendeds_df=pd.DataFrame(set(is_suspendeds),columns=['id'])
+        is_suspended_df=rqdatac.is_suspended(list(is_suspendeds_df['id']), start_date=st,end_date=et)
+        is_suspended_df.to_csv('config/is_suspended_df.csv') 
+        is_suspended_df=pd.read_csv(r'config/is_suspended_df.csv',index_col=0,parse_dates=True)
     
     ####wpg_macd_pred 用微盘股+macd二阶导判断买卖信号
     if args.task=='wpg_macd_pred':   
@@ -556,12 +571,38 @@ def main(args):
                    'MACD_pct_change', 'MACD_flag']].iloc[-30:].to_csv(args.file)
 
 
+    ####wpg_market_value_median 查看微盘股市值中位数
+    if args.task=='wpg_market_value_median':  
+        print('wpg_market_value_median...')
+        df=rqdatac.index_weights(order_book_id='866006.RI', date=args.et)
+        df=df.reset_index()
+        df.columns=['id','weight']
+        df['total_share']=list(rqdatac.get_shares(list(df['id']), start_date=args.et, end_date=args.et, fields=None, market='cn', expect_df=True)['total'])
+
+        df['close']=list(rqdatac.get_price(order_book_ids=list(df['id']), 
+                  start_date=args.et, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)['close'])  
+        df['market_value']=df['close']*df['total_share'] ##市值
+        print(df['market_value'].describe())
+        xx=1
+        
     ####rq_wpg_make_pms_csv 根据米筐微盘成分股等权生成pms目标持仓清单
     if args.task=='rq_wpg_make_pms_csv':  
         print('rq_wpg_make_pms_csv...')
         df=rqdatac.index_weights(order_book_id='866006.RI', date=args.et)
         df=df.reset_index()
         df.columns=['id','weight']
+        
+        announcement=rqdatac.get_announcement(list(df['id']),'20240101',args.et)
+        cc=announcement[announcement['title'].str.contains('立案')]
+        cc=cc.reset_index()
+        cc=set(cc['order_book_id'])
+        df=df[~df['id'].isin(cc)] ##过滤被立案的
+        df['weight']=1/len(df) ##重新计算权重
+        
         df['买卖日期']=args.et.strftime('%Y-%m-%d')
         
         df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
@@ -574,6 +615,7 @@ def main(args):
                   expect_df=True,time_slice=None)['close'])   
         each=args.money/len(df)
         df['买卖数量']=df['买卖价格'].apply(lambda close:int(each//(close*100)*100))
+        df.loc[(df['证券代码'].str.startswith('688')) & (df['买卖数量'] == 100), '买卖数量'] = 200 ##科创板至少200股
         df['买卖方向']='买入'
         res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
         # cash = {'证券代码': 'CNY', '买卖数量': '700000', '买卖价格': 1, '买卖方向': '划入'}            
@@ -612,9 +654,9 @@ def main(args):
         df=df.sort_values('调整股数',ascending=True)
         df=df[df['调整股数']!=0]
         
-        df['算法类型']='VWAP'
+        df['算法类型']='TWAP'
         df['账户名称']='百榕全天候宏观对冲绝对收益信用'
-        df['算法实例']='kf_vwap_plus'
+        df['算法实例']='kf_twap_plus'
         df['证券代码']=df['证券代码']
         df['交易方向']=df['调整股数'].apply(lambda x:'买入' if x>0 else '卖出')
         df['任务数量']=df['调整股数'].apply(abs)
@@ -648,6 +690,140 @@ def main(args):
         
         df.to_csv(args.ATX_file,index=False)
         print(f'save to {args.ATX_file}')
+
+    if args.task=='ATX_to_ATX_adjust':    
+        ####ATX_to_ATX_adjust 根据ATX的实时监控.xlsx,生成csv，用于ATX 清仓
+        print('ATX_to_ATX_adjust...')
+
+        df=pd.read_excel(args.ATX_pos_file,dtype=str)
+        df['证券市场']=df['交易市场'].apply(lambda x:'SZ' if x=='深交所' else 'SH')
+        df['证券代码']=df['证券代码']+'.'+df['证券市场']
+        df['当前拥股']=df['持仓数量'].apply(int)
+        df['目标拥股']=df['持仓数量'].apply(lambda x: int(float(x) * args.ratio))
+        df['调整股数']=df['目标拥股']-df['当前拥股']
+        df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
+        df=df.sort_values('调整股数',ascending=True)
+        df=df[df['调整股数']!=0]
+        
+        df['算法类型']='TWAP'
+        df['账户名称']='百榕全天候宏观对冲绝对收益信用'
+        df['算法实例']='kf_twap_plus'
+        df['证券代码']=df['证券代码']
+        df['交易方向']=df['调整股数'].apply(lambda x:'买入' if x>0 else '卖出')
+        df['任务数量']=df['调整股数'].apply(abs)
+        df['开始时间']=args.st
+        df['结束时间']=args.et
+        df['涨跌停是否继续执行']='涨停不卖跌停不买'
+        df['过期后是否继续执行']='否'
+        df['其他参数']=np.nan
+        df['交易市场']=np.nan
+        
+        columns=['算法类型',
+                '账户名称',
+                '算法实例',
+                '证券代码',
+                '任务数量',
+                '交易方向',
+                '开始时间',
+                '结束时间',
+                '涨跌停是否继续执行',
+                '过期后是否继续执行',
+                '其他参数',
+                '交易市场']
+        df=df[columns]
+        
+        df.to_csv(args.ATX_file,index=False)
+        
+    if args.task=='ATX_to_PMS_track':    
+        ####ATX_to_PMS_track 根据实际ATX 成交查询.xlsx 成交价格，生成PMS单 追踪
+        print('ATX_to_PMS_track...')
+        
+        df2=pd.read_excel(args.ATX_file,dtype=str)
+        date=df2['成交日期'].iloc[0].replace('/','-')
+        df2['证券市场']=df2['交易市场'].apply(lambda x:'SZ' if x=='深交所' else 'SH')
+        df2['证券代码']=df2['证券代码']+'.'+df2['证券市场']
+        df2=df2[['证券代码','成交数量','成交价格','交易方向']]
+        df2.columns=['证券代码', '买卖数量', '买卖价格', '买卖方向']
+        
+        # df2['买卖数量']=df2['买卖数量'].apply(lambda x:float(x.replace(',', '')))
+        # df2 = df2.groupby('证券代码').agg({'买卖数量': 'sum','买卖价格': 'first','买卖方向': 'first'}).reset_index()
+        # df2['买卖数量'] = df2['买卖数量'].apply(lambda x: math.ceil(x / 100) * 100)
+        
+        # cash = {'证券代码': 'CNY', '买卖数量': '920000', '买卖价格': 1, '买卖方向': '划入'}            
+        # cash=pd.DataFrame([cash])
+        # res=pd.concat([cash,df2])   
+        res=df2
+        res.insert(0, '买卖日期', date)
+        
+        acc='绝对收益信用'  ##文件名和账户名有关联
+        now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")##文件名和时间有关联
+        path=f'./PMS_csv/{acc}_{now}.xlsx'  
+        with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
+            res.to_excel(writer, sheet_name='导入数据区', index=False)   
+            print(f'save to {path}')
+
+
+    ####wpg_adjust_dif 微盘股如果周频调仓，每次调整数量
+    if args.task=='wpg_adjust_dif':   
+        
+        dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
+        res=[] 
+        res2=[]
+        for date in tqdm(dates):        
+            weights=rqdatac.index_weights(order_book_id='866006.RI', date=date)
+            weights=weights.reset_index()
+            res.append(set(weights['order_book_id']))
+        res=res[::5]
+        for i in range(1,len(res)):
+            res2.append(len(res[i]-res[i-1]))
+        print(np.mean(res2))
+        xx=1
+
+    ####crowdedness 微盘股拥挤度
+    if args.task=='crowdedness':   
+        
+        #微盘股拥挤度
+        dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
+        res=[] ##存每天的微盘股拥挤度
+        for date in tqdm(dates):        
+            r1=rqdatac.get_price(order_book_ids=args.id1, 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            r2=rqdatac.get_price(order_book_ids=args.id2, 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            
+            wpg_turnover=wpg['total_turnover'].iloc[0]
+            total_turnover=r1['total_turnover'].iloc[0]+r2['total_turnover'].iloc[0]
+            crowdedness=wpg_turnover/total_turnover
+            res.append(crowdedness)
+            
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)     
+        wpg.index = wpg.index.get_level_values(1)
+        wpg['crowdedness']=res
+        Plot.plot_res(wpg,'',cols = ['close','crowdedness'],start_time = wpg.index[0],
+                                        end_time=wpg.index[-1],
+                                        days = None,
+                                        maxmin=True)
+        xx=a
+
     ####exp 日常实验
     if args.task=='exp':   
         ##微盘股和中证2000
@@ -672,46 +848,6 @@ def main(args):
         # Metrics.print_metrics(wpg['wpg_return'][1:],wpg.index[1:],0.03)   
         # Metrics.print_metrics(zz2000['zz2000_return'][1:],zz2000.index[1:],0.03)   
         
-        ##微盘股拥挤度
-        # dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
-        # res=[] ##存每天的微盘股拥挤度
-        # for date in tqdm(dates):        
-        #     r1=rqdatac.get_price(order_book_ids=args.id1, 
-        #               start_date=date, 
-        #               end_date=date, 
-        #               frequency='1d', 
-        #               fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-        #               expect_df=True,time_slice=None)
-        #     r2=rqdatac.get_price(order_book_ids=args.id2, 
-        #               start_date=date, 
-        #               end_date=date, 
-        #               frequency='1d', 
-        #               fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-        #               expect_df=True,time_slice=None)
-        #     wpg=rqdatac.get_price(order_book_ids='866006.RI', 
-        #               start_date=date, 
-        #               end_date=date, 
-        #               frequency='1d', 
-        #               fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-        #               expect_df=True,time_slice=None)
-            
-        #     wpg_turnover=wpg['total_turnover'].iloc[0]
-        #     total_turnover=r1['total_turnover'].iloc[0]+r2['total_turnover'].iloc[0]
-        #     crowdedness=wpg_turnover/total_turnover
-        #     res.append(crowdedness)
-            
-        # wpg=rqdatac.get_price(order_book_ids='866006.RI', 
-        #           start_date=args.st, 
-        #           end_date=args.et, 
-        #           frequency='1d', 
-        #           fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-        #           expect_df=True,time_slice=None)     
-        # wpg.index = wpg.index.get_level_values(1)
-        # wpg['crowdedness']=res
-        # Plot.plot_res(wpg,'',cols = ['close','crowdedness'],start_time = wpg.index[0],
-        #                                 end_time=wpg.index[-1],
-        #                                 days = None,
-        #                                 maxmin=True)
         
         # df=pd.read_csv('D:/project/quant/rq_app_exp/data/wpg_crowdedness.csv',index_col=0,parse_dates=True)
         df=rqdatac.get_price(order_book_ids='866006.RI', 
@@ -722,7 +858,29 @@ def main(args):
                   expect_df=True,time_slice=None)
         df.index = df.index.get_level_values(1)
         df['return']=df['close']/df['prev_close']-1
-        
+
+        ####M5逃顶抄底法
+        if args.method=='compare_rq_wind':
+            wind=pd.read_csv('ATX_csv/8841431.WI-行情统计-20250416.csv',index_col=0,parse_dates=True)
+            wind = wind.sort_index(ascending=True)
+            wind=wind[['涨跌幅(%)']]
+            xx=df.join(wind,how='inner')
+            xx['涨跌幅(%)']=xx['涨跌幅(%)']/100
+            
+            Metrics.print_metrics(xx['return'],xx.index,0.03)  
+            xx['net']=list(Convert.returns_to_net(xx['return'])) 
+            print('\n')
+            Metrics.print_metrics(xx['涨跌幅(%)'],xx.index,0.03)   
+            xx['wind_net']=list(Convert.returns_to_net(xx['涨跌幅(%)'])) 
+            
+            Plot.plot_res(xx,'',cols = ["net",
+                                        "wind_net",
+                                        ],start_time = xx.index[0],
+                                              end_time=xx.index[-1],
+                                              days = None,
+                                              maxmin=False)            
+            
+            cc=1
         ####M5逃顶抄底法
         if args.method=='M5_1':
             df['M5_volume'] = df['volume'].rolling(window=5).mean()
@@ -1008,6 +1166,120 @@ def main(args):
                                               days = None,
                                               maxmin=False)
         
+        ####macd顶分型
+        if args.method=='MACD_3':
+            df['DIF'], df['DEA'], df['MACD'] = talib.MACD(df['close'], 
+                                                        fastperiod=12, 
+                                                        slowperiod=26, 
+                                                        signalperiod=9)
+            def func1(window):
+                # 判断单调性
+                threshold=0.05
+                buy = (window[0] > window[1])  and (window[1] > window[2]) and (window[2] < window[3]) and (window[3] < window[4]) 
+                sell = (window[0] < window[1])  and (window[1] < window[2]) and (window[2] > window[3]) and (window[3] > window[4]) 
+                return 1 if buy else (-1 if sell else 0)
+            
+            df['MACD_signal'] = df['MACD'].rolling(window=5, min_periods=1).apply(func1)
+            df['MACD_flag'] = False ##True代表该天空仓
+            # 标记区间的开始和结束
+            flag = False  
+            for i in range(len(df)):
+                index=df.index[i]
+                if df.loc[index, 'MACD_signal']==-1 and not flag:
+                    flag = True
+                if df.loc[index, 'MACD_signal']==1 and flag:
+                    flag = False
+                if flag:
+                    df.loc[index, 'MACD_flag'] = True
+            df['MACD_flag']=df['MACD_flag'].shift(1)
+            df=df.dropna()
+            
+            def func2(row):
+                if row['MACD_flag']:
+                    return 0
+                else:
+                    return row['return']
+            df['MACD_return']=df.apply(func2, axis=1)
+            
+            df=df['2017-06-01':]
+            print(df.index[0],df.index[-1])
+            def check_inconsistency(window):
+                return window[0] != window[1]
+            res = df['MACD_flag'].rolling(window=2).apply(check_inconsistency, raw=True)
+            inconsistency_count = res.sum()
+            print(f'交易次数：{inconsistency_count}')
+            
+            Metrics.print_metrics(df['return'],df.index,0.03)  
+            df['net']=list(Convert.returns_to_net(df['return'])) 
+            print('\n')
+            Metrics.print_metrics(df['MACD_return'],df.index,0.03)   
+            df['MACD_net']=list(Convert.returns_to_net(df['MACD_return'])) 
+            
+            Plot.plot_res(df,'',cols = ["net",
+                                        "MACD_net",
+                                        ],start_time = df.index[0],
+                                              end_time=df.index[-1],
+                                              days = None,
+                                              maxmin=False)
+        ####close顶底分型
+        if args.method=='top_bot':
+            def func1(window):
+                # 通过窗口索引获取所有列数据
+                idx = window.index
+                window = df.loc[idx, ['high', 'low']]
+                high0=window.iloc[0]['high']
+                high1=window.iloc[1]['high']
+                high2=window.iloc[2]['high']
+                low0=window.iloc[0]['low']
+                low1=window.iloc[1]['low']
+                low2=window.iloc[2]['low']
+                
+                buy = (high1<high0) and (high1<high2) and (low1<low0) and (low1<low2)
+                sell = (high1>high0) and (high1>high2) and (low1>low0) and (low1>low2)
+                return 1 if buy else (-1 if sell else 0)
+            
+            df['close_signal'] = df['high'].rolling(window=3, min_periods=3).apply(func1)
+            df['close_flag'] = False ##True代表该天空仓
+            # 标记区间的开始和结束
+            flag = False  
+            for i in range(len(df)):
+                index=df.index[i]
+                if df.loc[index, 'close_signal']==-1 and not flag:
+                    flag = True
+                if df.loc[index, 'close_signal']==1 and flag:
+                    flag = False
+                if flag:
+                    df.loc[index, 'close_flag'] = True
+            df['close_flag']=df['close_flag'].shift(1)
+            df=df.dropna()
+            
+            def func2(row):
+                if row['close_flag']:
+                    return 0
+                else:
+                    return row['return']
+            df['close_return']=df.apply(func2, axis=1)
+            
+            df=df['2017-06-01':]
+            print(df.index[0],df.index[-1])
+            def check_inconsistency(window):
+                return window[0] != window[1]
+            res = df['close_flag'].rolling(window=2).apply(check_inconsistency, raw=True)
+            inconsistency_count = res.sum()
+            print(f'交易次数：{inconsistency_count}')
+            
+            Metrics.print_metrics(df['return'],df.index,0.03)  
+            df['net']=list(Convert.returns_to_net(df['return'])) 
+            print('\n')
+            Metrics.print_metrics(df['close_return'],df.index,0.03)   
+            df['close_net']=list(Convert.returns_to_net(df['close_return'])) 
+            
+            Plot.plot_res(df,'',cols = ["net",
+                                        "close_net",
+                                        ],start_time = df.index[0],
+                                              end_time=df.index[-1],
+                                              days = None,
+                                              maxmin=False)
     ####backtest 回测
     if args.task=='backtest':         
 
@@ -1145,15 +1417,17 @@ if __name__ == '__main__':
     
     # args.task='make_config'
     
-    # args.task='backtest'
-    # args.st='20240101'
-    # args.et='20241231'
-    # args.file=r'data/多因子策略等权.xlsx'
     
-    # args.task='make_backtest_file'
+    args.task='make_backtest_file'
+    args.st='20200101'
+    args.et='20250321'
+    args.f=5
+    args.file=r'data/米筐微盘股等权周频.xlsx'
+    
+    # args.task='backtest'
     # args.st='20200101'
-    # args.et='20250321'
-    # args.file=r'data/米筐微盘股等权.xlsx'
+    # args.et='20250319'
+    # args.file=r'data/米筐微盘股等权周频.xlsx'
     
     # args.task='exp'
     # args.st='20200101'
@@ -1168,10 +1442,10 @@ if __name__ == '__main__':
     # args.file=r'data/多因子策略等权.xlsx'
     
     # args.task='exp'
-    # args.method='MACD_2'
+    # args.method='compare_rq_wind'
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
-    # args.st='20170101'
+    # args.st='20210101'
     # args.et='20250410'
     
     # args.task='wpg_macd_pred'
@@ -1180,14 +1454,38 @@ if __name__ == '__main__':
     # args.file='signal/wpg_macd_pred.csv'
     
     # args.task='rq_wpg_make_pms_csv'
-    # args.et=rqdatac.get_latest_trading_date()
+    # # args.et=rqdatac.get_latest_trading_date()
+    # args.et=pd.to_datetime('20250415')
     # args.money=200e4
     
-    args.task='rq_wpg_adjust_ATX'
-    args.ATX_pos_file='ATX_csv/持仓查询_20250411150745.xlsx'
-    args.pms_file='PMS_csv/绝对收益信用_2025-04-11.xlsx'
-    args.ATX_file='ATX_csv/ATX_stock_2025-04-13_1.csv'
-    args.start_time='20250413T093000000'
-    args.end_time=  '20250413T103000000'  
+    # args.task='rq_wpg_adjust_ATX'
+    # args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'
+    # args.pms_file='PMS_csv/绝对收益信用_2025-04-15.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-04-16_1.csv'
+    # args.start_time='20250416T093000000'
+    # args.end_time=  '20250416T103000000'  
+    
+    # args.task='ATX_to_PMS_track'
+    # args.ATX_file='ATX_csv/成交查询_20250414111438.xlsx'
+    
+    # args.task='ATX_to_ATX_adjust'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250414151014.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-04-15_1.csv'
+    # args.st='20250415T093000000'
+    # args.et=  '20250415T103000000'  
+    # args.ratio=0
+    
+    # args.task='crowdedness'
+    # args.id1='000001.XSHG'
+    # args.id2='399106.XSHE'
+    # args.st='20240101'
+    # args.et='20250414'
+    
+    # args.task='wpg_adjust_dif'
+    # args.st='20240101'
+    # args.et='20250414'
+    
+    # args.task='wpg_market_value_median'
+    # args.et='20250410'
     
     main(args)
