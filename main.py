@@ -248,6 +248,22 @@ def main(args):
             res3=select[['id','name']]
             res3.to_excel(writer, sheet_name='股票名清单', index=False)              
         
+    ####compare_wind_rq 对比wind和rq微盘股
+    if args.task=='compare_wind_rq':    
+        weights=rqdatac.index_weights(order_book_id='866006.RI', date=args.et)
+        weights=weights.reset_index()
+        weights['代码']=list(weights['order_book_id'].apply(lambda id:rqdatac.id_convert(id,to='normal')))
+        rq=set(weights['代码'])
+        wind=pd.read_excel('data/8841431.WI-成分及权重-20250417.xlsx')
+        wind=set(wind['代码'])
+        
+        print(f'交集数量:{len(rq.intersection(wind))}')
+        print('rq有，wind没有：')
+        print(rq.difference(wind)) 
+        print('rq没有，wind有：')
+        print(wind.difference(rq)) 
+        xx=1
+        
     ####make_backtest_file 制作回测所需文件
     if args.task=='make_backtest_file':    
         cols_risk_factor=[
@@ -470,35 +486,41 @@ def main(args):
         st=args.st
         et=args.et
         dates=rqdatac.get_trading_dates(st, et, market='cn')
-        is_suspendeds=[]
+        # is_suspendeds=[]
         for date in tqdm(dates[::args.f]): ##args.f是回测频率
             weights=rqdatac.index_weights(order_book_id='866006.RI', date=date)
             weights=weights.reset_index()
             weights.columns=['TICKER','TARGET_WEIGHT']
-            ##组合优化
-            # new_weight=portfolio_optimize(order_book_ids=list(weights['TICKER']), 
-            #                    date=date, 
-            #                    objective= MaxSharpeRatio(window=30), 
-            #                    bnds={'*': (0.002, 0.02)}, 
-            #                    cons=None, 
-            #                    benchmark=None, 
-            #                    cov_model=CovModel.FACTOR_MODEL_DAILY)
-            # new_weight=new_weight.reset_index()
-            # new_weight.columns=['TICKER','new_weight']            
-            # merged = pd.merge(weights, new_weight, on='TICKER')
-            # weights['TARGET_WEIGHT'] = merged['new_weight']
+            ####组合优化
+            new_weight=portfolio_optimize(order_book_ids=list(weights['TICKER']), 
+                                date=date, 
+                                # objective= MinVariance(), 
+                                # objective= MeanVariance(window=252), 
+                                objective= MaxSharpeRatio(window=252), 
+                                # bnds={'*': (0.002, 0.02)}, 
+                                cons=None, 
+                                benchmark=None, 
+                                cov_model=CovModel.FACTOR_MODEL_DAILY)
+            new_weight=new_weight.reset_index()
+            new_weight.columns=['TICKER','new_weight']            
+            merged = pd.merge(weights, new_weight, on='TICKER')
+            weights['TARGET_WEIGHT'] = merged['new_weight']
 
             weights['TRADE_DT']=date.strftime('%Y%m%d')
             weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
-            weights['close']=list(rqdatac.get_price(order_book_ids=list(weights['TICKER']), 
-                      start_date=date, 
-                      end_date=date, 
-                      frequency='1d', 
-                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                      expect_df=True,time_slice=None)['close'])
-            weights['TARGET_WEIGHT']=weights['close']/sum(weights['close'])
+            
+            ## 等股
+            # weights['close']=list(rqdatac.get_price(order_book_ids=list(weights['TICKER']), 
+            #           start_date=date, 
+            #           end_date=date, 
+            #           frequency='1d', 
+            #           fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+            #           expect_df=True,time_slice=None)['close'])
+            # weights['TARGET_WEIGHT']=weights['close']/sum(weights['close'])
+            
+            
             weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
-            is_suspendeds+=list(weights['TICKER'])
+            # is_suspendeds+=list(weights['TICKER'])
             inputs.append(weights)
         
         inputs=pd.concat(inputs,axis=0)
@@ -506,11 +528,87 @@ def main(args):
             inputs.to_excel(writer, sheet_name='', index=False)  
             print(f'save to {args.file}')
             
-        is_suspendeds_df=pd.DataFrame(set(is_suspendeds),columns=['id'])
-        is_suspended_df=rqdatac.is_suspended(list(is_suspendeds_df['id']), start_date=st,end_date=et)
-        is_suspended_df.to_csv('config/is_suspended_df.csv') 
-        is_suspended_df=pd.read_csv(r'config/is_suspended_df.csv',index_col=0,parse_dates=True)
-    
+        # is_suspendeds_df=pd.DataFrame(set(is_suspendeds),columns=['id'])
+        # is_suspended_df=rqdatac.is_suspended(list(is_suspendeds_df['id']), start_date=st,end_date=et)
+        # is_suspended_df.to_csv('config/is_suspended_df.csv') 
+        # is_suspended_df=pd.read_csv(r'config/is_suspended_df.csv',index_col=0,parse_dates=True)
+
+    ####make_backtest_file2 制作微盘股+macd回测所需文件
+    if args.task=='make_backtest_file2':     
+        df2=pd.read_excel('data/米筐微盘股等权日频.xlsx',dtype=str)
+
+        df=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        df.index = df.index.get_level_values(1)
+        df['return']=df['close']/df['prev_close']-1
+        
+        df['DIF'], df['DEA'], df['MACD'] = talib.MACD(df['close'], 
+                                                    fastperiod=12, 
+                                                    slowperiod=26, 
+                                                    signalperiod=9)
+        def func1(window):
+            # 判断单调性
+            threshold=0.04
+            buy = (window[1] > window[0]) and (window[2] > window[1]) and (abs(window[1]/window[0]-1)>threshold) and (abs(window[2]/window[1]-1)>threshold)
+            sell = (window[0] > window[1]) and (window[1] > window[2]) and (abs(window[1]/window[0]-1)>threshold) and (abs(window[2]/window[1]-1)>threshold)
+            return 1 if buy else (-1 if sell else 0)
+        
+        df['MACD_signal'] = df['MACD'].rolling(window=3, min_periods=1).apply(func1)
+        def func3(window):
+            return window[1]/window[0]-1      
+        df['MACD_pct_change'] = df['MACD'].rolling(window=2, min_periods=1).apply(func3)
+        
+        df['MACD_flag'] = False ##True代表该天空仓
+        # 标记区间的开始和结束
+        flag = False  
+        for i in range(len(df)):
+            index=df.index[i]
+            if df.loc[index, 'MACD_signal']==-1 and not flag:
+                flag = True
+            if df.loc[index, 'MACD_signal']==1 and flag:
+                flag = False
+            if flag:
+                df.loc[index, 'MACD_flag'] = True
+        df['MACD_flag']=df['MACD_flag'].shift(1)
+        df=df.dropna()
+        
+        def func2(row):
+            if row['MACD_flag']:
+                return 0
+            else:
+                return row['return']
+        df['MACD_return']=df.apply(func2, axis=1)
+        
+        mask = df['MACD_flag'] & ~df['MACD_flag'].shift(1, fill_value=False)
+        df['MACD_flag_first_True'] = np.where(df['MACD_flag'], mask, df['MACD_flag'])
+        df['MACD_flag_filted'] = df['MACD_flag'] & ~df['MACD_flag_first_True']
+        filted_list=list(df[df['MACD_flag_filted']==True].index)
+        filted_list=list(map(lambda x:x.strftime("%Y%m%d"),filted_list))
+        df3=df2[~df2['TRADE_DT'].isin(filted_list)]
+        
+        df3_list=list(df3.groupby('TRADE_DT'))
+        first_True_list=list(df[df['MACD_flag_first_True']==True].index)
+        first_True_list=list(map(lambda x:x.strftime("%Y%m%d"),first_True_list))
+        
+        df4=[]
+        for i in tqdm(range(1,len(df3_list))):
+            if df3_list[i][1]['TRADE_DT'].iloc[0] in first_True_list:
+                prev=copy.deepcopy(df3_list[i-1][1]) #复制上一个
+                prev['TARGET_WEIGHT']=0
+                prev['TRADE_DT']=df3_list[i][0]
+                df4.append(prev)
+            else:
+                df4.append(df3_list[i][1])
+        df4=pd.concat(df4,axis=0)
+        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+            df4.to_excel(writer, sheet_name='', index=False)  
+            print(f'save to {args.file}')        
+        xx=a
+
     ####wpg_macd_pred 用微盘股+macd二阶导判断买卖信号
     if args.task=='wpg_macd_pred':   
         df=rqdatac.get_price(order_book_ids='866006.RI', 
@@ -655,7 +753,7 @@ def main(args):
         df=df[df['调整股数']!=0]
         
         df['算法类型']='TWAP'
-        df['账户名称']='百榕全天候宏观对冲绝对收益信用'
+        df['账户名称']=args.account
         df['算法实例']='kf_twap_plus'
         df['证券代码']=df['证券代码']
         df['交易方向']=df['调整股数'].apply(lambda x:'买入' if x>0 else '卖出')
@@ -779,6 +877,43 @@ def main(args):
         print(np.mean(res2))
         xx=1
 
+    ####wpg_drop_study 微盘股大跌研究
+    if args.task=='wpg_drop_study':   
+        df=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)        
+        lag=21
+        df['y']=df['close'].shift(-1*lag)/df['close']-1
+        xx=1
+
+    ####crowdedness_study 微盘股拥挤度研究
+    if args.task=='crowdedness_study':   
+        df=pd.read_csv('data/wpg_crowdedness.csv',index_col=0,parse_dates=True)
+        from scipy.stats import percentileofscore
+        df=df['2020-01-01':]
+        df['crowdedness_percent'] = [percentileofscore(df['crowdedness'], v) for v in df['crowdedness']]
+        # plt.plot(df['crowdedness'])
+        
+        lag=99
+        df['y']=df['close'].shift(-1*lag)/df['close']-1
+        df2=df.dropna()
+        df2.to_csv('data/wpg_crowdedness_percent.csv')
+        plt.scatter(list(df2['crowdedness_percent']),list(df2['y']))
+        plt.xlabel('Crowdedness')
+        plt.ylabel(f'未来{lag}天涨幅')
+        plt.show()
+        # corr=df2['y'].corr(df2['crowdedness_percent'])
+        
+        
+        # for lag in range(1,360):
+        #     df['y']=df['close'].shift(-1*lag)/df['close']-1
+        #     df2=df.dropna()
+        #     corr=df2['y'].corr(df2['crowdedness_percent'])
+        #     print(f'{lag}-{corr}')
+        xx=1
     ####crowdedness 微盘股拥挤度
     if args.task=='crowdedness':   
         
@@ -824,8 +959,8 @@ def main(args):
                                         maxmin=True)
         xx=a
 
-    ####exp 日常实验
-    if args.task=='exp':   
+    ####buy_sell逃顶抄底信号实验
+    if args.task=='buy_sell':   
         ##微盘股和中证2000
         # wpg=rqdatac.get_price(order_book_ids='866006.RI', 
         #           start_date=args.st, 
@@ -1297,12 +1432,30 @@ def main(args):
             #     "price_limit": False
             # },
             
+
+
             
             "mod": {
                 "sys_analyser": {
                     "plot": True,
-                    "benchmark": "932000.INDX"
-                }
+                    "benchmark": "866006.RI"
+                    # "benchmark": "932000.INDX"
+                },
+                # 费用模块，该模块的配置项用于调整交易的税费
+                "sys_transaction_cost": {
+                    # 股票最小手续费，单位元
+                    "cn_stock_min_commission": 5,
+                    # 佣金倍率（即将废弃）
+                    "commission_multiplier": 0.125,
+                    # 股票佣金倍率,即在默认的手续费率基础上按该倍数进行调整，股票的默认佣金为万八
+                    "stock_commission_multiplier": 1,
+                    # 期货佣金倍率,即在默认的手续费率基础上按该倍数进行调整，期货默认佣金因合约而异
+                    "futures_commission_multiplier": 1,
+                    # 印花倍率，即在默认的印花税基础上按该倍数进行调整，股票默认印花税为万分之五，单边收取
+                    "tax_multiplier": 1,
+                    # 是否使用回测当时时间点对应的真实印花税率
+                    "pit_tax": False,
+                },
             }
         }
         
@@ -1324,7 +1477,7 @@ def main(args):
         
         def on_order_failure(context, event):
             # 拒单时，未成功下单的标的放入第二天下单队列中
-            order_book_id = event.order.order_book_id
+            order_book_id = getattr(event, "order_book_id", None) or getattr(event.order, "order_book_id", None)
             context.next_target_queue.append(order_book_id)
         
         
@@ -1371,10 +1524,11 @@ def main(args):
         # 你选择的证券的数据更新将会触发此段逻辑，例如日或分钟历史数据切片或者是实时数据切片更新
         def handle_bar(context, bar_dict):
             if context.target_queue:
+                context.target_queue = list(set(context.target_queue))
                 for _ticker in context.target_queue:
-                    flag=is_suspended_df.loc[context.now.strftime('%Y-%m-%d'),_ticker]
-                    if flag:
-                        continue
+                    # flag=is_suspended_df.loc[context.now.strftime('%Y-%m-%d'),_ticker]
+                    # if flag:
+                    #     continue
                 
                     _target_weight = context.current_target_table.get(_ticker, 0)
                     o = order_target_percent(_ticker, round(_target_weight, 6))
@@ -1402,7 +1556,7 @@ def main(args):
                                              end_date=str(df['TRADE_DT'].iloc[-1]))
         res=run_func(init=init, before_trading=before_trading, after_trading=after_trading, handle_bar=handle_bar,
                   config=__config__)
-
+        xx=a
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
@@ -1417,19 +1571,34 @@ if __name__ == '__main__':
     
     # args.task='make_config'
     
+    # args.task='compare_wind_rq'
+    # args.et='20250417'
     
-    args.task='make_backtest_file'
-    args.st='20200101'
+    # args.task='make_backtest_file'
+    # args.st='20200101'
+    # args.et='20250321'
+    # args.f=5
+    # args.file=r'data/米筐微盘股macd周频.xlsx'
+    
+    args.task='wpg_drop_study'
+    args.st='20170101'
     args.et='20250321'
-    args.f=5
-    args.file=r'data/米筐微盘股等权周频.xlsx'
+    
+    # args.task='make_backtest_file2'
+    # args.st='20200101'
+    # args.et='20250321'
+    # args.f=1
+    # args.file=r'data/米筐微盘股macd日频.xlsx'
     
     # args.task='backtest'
     # args.st='20200101'
     # args.et='20250319'
-    # args.file=r'data/米筐微盘股等权周频.xlsx'
+    # args.file=r'data/米筐微盘股macd日频.xlsx'
     
-    # args.task='exp'
+    # args.task='buy_sell'
+    # args.method='MACD_2'
+    # args.id1='000001.XSHG'
+    # args.id2='399106.XSHE'
     # args.st='20200101'
     # args.et='20250321'
     
@@ -1455,18 +1624,20 @@ if __name__ == '__main__':
     
     # args.task='rq_wpg_make_pms_csv'
     # # args.et=rqdatac.get_latest_trading_date()
-    # args.et=pd.to_datetime('20250415')
+    # args.et=pd.to_datetime('20250421')
     # args.money=200e4
     
     # args.task='rq_wpg_adjust_ATX'
     # args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'
-    # args.pms_file='PMS_csv/绝对收益信用_2025-04-15.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-04-16_1.csv'
-    # args.start_time='20250416T093000000'
-    # args.end_time=  '20250416T103000000'  
+    # args.pms_file='PMS_csv/绝对收益信用_2025-04-21.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-04-22_1.csv'
+    # args.start_time='20250422T093000000'
+    # args.end_time=  '20250422T103000000'  
+    # args.account='百榕全天候宏观对冲绝对收益信用'
+    # args.account='百榕百里挑一稳健一号信用'
     
     # args.task='ATX_to_PMS_track'
-    # args.ATX_file='ATX_csv/成交查询_20250414111438.xlsx'
+    # args.ATX_file='ATX_csv/成交查询_20250421152047.xlsx'
     
     # args.task='ATX_to_ATX_adjust'
     # args.ATX_pos_file='ATX_csv/持仓查询_20250414151014.xlsx'
@@ -1479,7 +1650,7 @@ if __name__ == '__main__':
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
     # args.st='20240101'
-    # args.et='20250414'
+    # args.et='20250418'
     
     # args.task='wpg_adjust_dif'
     # args.st='20240101'
@@ -1487,5 +1658,7 @@ if __name__ == '__main__':
     
     # args.task='wpg_market_value_median'
     # args.et='20250410'
+    
+    # args.task='crowdedness_study'
     
     main(args)
