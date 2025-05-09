@@ -608,6 +608,32 @@ def main(args):
             df4.to_excel(writer, sheet_name='', index=False)  
             print(f'save to {args.file}')        
         xx=a
+        
+    ####make_backtest_file3 制作微盘股1、4、12月空仓，用红利股替代的回测所需文件
+    if args.task=='make_backtest_file3':     
+        inputs=[]
+        st=args.st
+        et=args.et
+        dates=rqdatac.get_trading_dates(st, et, market='cn')
+        hlg_month=[1,4,12]
+        for date in tqdm(dates): 
+            if date.month in hlg_month:
+                print(date.month,'红利')
+                weights=rqdatac.index_weights(order_book_id='000922.XSHG', date=date)
+            else:
+                print(date.month,'微盘股')
+                weights=rqdatac.index_weights(order_book_id='866006.RI', date=date)
+            weights=weights.reset_index()
+            weights.columns=['TICKER','TARGET_WEIGHT']
+            weights['TRADE_DT']=date.strftime('%Y%m%d')
+            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
+            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
+            inputs.append(weights)
+        inputs=pd.concat(inputs,axis=0)
+        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+            inputs.to_excel(writer, sheet_name='', index=False)  
+            print(f'save to {args.file}')        
+        
 
     ####wpg_macd_pred 用微盘股+macd二阶导判断买卖信号
     if args.task=='wpg_macd_pred':   
@@ -722,7 +748,7 @@ def main(args):
         # res=df2
         # res.insert(0, '买卖日期', '2024-11-26')
         
-        acc='绝对收益信用'  ##文件名和账户名有关联
+        acc='共同target'  ##文件名和账户名有关联
         now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
         path=f'./PMS_csv/{acc}_{now}.xlsx'  
         with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
@@ -771,6 +797,10 @@ def main(args):
         # xx.columns=['证券代码','证券名称']
         # df=pd.merge(df,xx,on='证券代码',how='left')
         df=df.reset_index()
+        
+        df.loc[(df['证券代码'].str.startswith('688')) & (df['调整股数'] == 100), '调整股数'] = 0 ##科创板至少200股,就不调整了
+        df.loc[(df['证券代码'].str.startswith('688')) & (df['调整股数'] == -100), '调整股数'] = 0 ##科创板至少200股,就不调整了
+        df=df[df['调整股数']!=0]
         
         columns=['算法类型',
                 '账户名称',
@@ -877,6 +907,71 @@ def main(args):
         print(np.mean(res2))
         xx=1
 
+
+    ####wpg_hlg_return_study 微盘股和红利股每月收益研究
+    if args.task=='wpg_hlg_return_study':   
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None) 
+        wpg.index = wpg.index.get_level_values(1)
+        wpg['year'] = wpg.index.year
+        wpg['month'] = wpg.index.month
+        
+        group1=list(wpg.groupby(['year', 'month']))
+        ys=[]
+        for i,item in enumerate(group1):
+            if i==0:
+                y=group1[i][1]['close'].iloc[-1] / group1[i][1]['close'].iloc[0] - 1
+            else:
+                y=group1[i][1]['close'].iloc[-1] / group1[i-1][1]['close'].iloc[-1] - 1
+            ys.append([item[0],y])
+            
+        df1 = pd.DataFrame(ys, columns=['Date', 'Return'])
+        df1['Year'], df1['Month'] = zip(*df1['Date'])
+        df1 = df1.drop(columns=['Date'])
+        df1 = df1.pivot(index='Year', columns='Month', values='Return')                
+        df1['年度累计'] = (df1.iloc[:, :12]+1).prod(axis=1)-1
+        # monthly_returns = df1.applymap(lambda x: "{:.2%}".format(x))
+        monthly_returns=df1
+        monthly_returns.index.name='月度收益'
+        res_wpg=monthly_returns.describe()
+
+        hlg=rqdatac.get_price(order_book_ids='000922.XSHG', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None) 
+        hlg.index = hlg.index.get_level_values(1)
+        hlg['year'] = hlg.index.year
+        hlg['month'] = hlg.index.month
+        
+        group1=list(hlg.groupby(['year', 'month']))
+        ys=[]
+        for i,item in enumerate(group1):
+            if i==0:
+                y=group1[i][1]['close'].iloc[-1] / group1[i][1]['close'].iloc[0] - 1
+            else:
+                y=group1[i][1]['close'].iloc[-1] / group1[i-1][1]['close'].iloc[-1] - 1
+            ys.append([item[0],y])
+            
+        df1 = pd.DataFrame(ys, columns=['Date', 'Return'])
+        df1['Year'], df1['Month'] = zip(*df1['Date'])
+        df1 = df1.drop(columns=['Date'])
+        df1 = df1.pivot(index='Year', columns='Month', values='Return')                
+        df1['年度累计'] = (df1.iloc[:, :12]+1).prod(axis=1)-1
+        # monthly_returns = df1.applymap(lambda x: "{:.2%}".format(x))
+        monthly_returns=df1
+        monthly_returns.index.name='月度收益'
+        res_hlg=monthly_returns.describe()        
+
+        xx=1
+        
+        
+        
     ####wpg_drop_study 微盘股大跌研究
     if args.task=='wpg_drop_study':   
         df=rqdatac.get_price(order_book_ids='866006.RI', 
@@ -887,6 +982,16 @@ def main(args):
                   expect_df=True,time_slice=None)        
         lag=21
         df['y']=df['close'].shift(-1*lag)/df['close']-1
+        df=df.sort_values(['y'],ascending=True)
+        focus=df[df['y']<-0.1]
+        focus=focus.sort_values(['date'],ascending=True)
+        focus=focus.reset_index()
+        focus['year_month'] = focus['date'].dt.to_period('M').apply(str)
+        group=focus.groupby('year_month')
+        res=[]
+        for date,v in group:
+            res.append([date,v['y'].mean()])
+        res=pd.DataFrame(res,columns=['date','21day_return'])
         xx=1
 
     ####crowdedness_study 微盘股拥挤度研究
@@ -914,6 +1019,53 @@ def main(args):
         #     corr=df2['y'].corr(df2['crowdedness_percent'])
         #     print(f'{lag}-{corr}')
         xx=1
+        
+        
+    ####pick_st_sell 找出st的票然后清掉
+    if args.task=='pick_st_sell':   
+        df=pd.read_excel(args.ATX_pos_file,dtype=str)
+        st=df[df['证券名称'].str.contains('ST')] ##筛选出st的
+        st=st[st['持仓盈亏'].apply(float)>0] ##筛选出盈利的st卖掉
+        
+        st['证券市场']=st['交易市场'].apply(lambda x:'SZ' if x=='深交所' else 'SH')
+        st['证券代码']=st['证券代码']+'.'+st['证券市场']
+        st['当前拥股']=st['持仓数量'].apply(int)
+        st['目标拥股']=st['持仓数量'].apply(lambda x: int(float(x) * args.ratio))
+        st['调整股数']=st['目标拥股']-st['当前拥股']
+        st['调整股数']=st['调整股数'].apply(lambda x: round(x / 100) * 100)
+        st=st.sort_values('调整股数',ascending=True)
+        st=st[st['调整股数']!=0]
+        
+        st['算法类型']='TWAP'
+        # st['账户名称']='百榕全天候宏观对冲绝对收益信用'
+        st['算法实例']='kf_twap_plus'
+        st['证券代码']=st['证券代码']
+        st['交易方向']=st['调整股数'].apply(lambda x:'买入' if x>0 else '卖出')
+        st['任务数量']=st['调整股数'].apply(abs)
+        st['开始时间']=args.st
+        st['结束时间']=args.et
+        st['涨跌停是否继续执行']='涨跌停继续交易'
+        st['过期后是否继续执行']='否'
+        st['其他参数']=np.nan
+        st['交易市场']=np.nan
+        
+        columns=['算法类型',
+                '账户名称',
+                '算法实例',
+                '证券代码',
+                '任务数量',
+                '交易方向',
+                '开始时间',
+                '结束时间',
+                '涨跌停是否继续执行',
+                '过期后是否继续执行',
+                '其他参数',
+                '交易市场']
+        st=st[columns]
+        
+        st.to_csv(args.ATX_file,index=False)        
+        
+        
     ####crowdedness 微盘股拥挤度
     if args.task=='crowdedness':   
         
@@ -1467,9 +1619,9 @@ def main(args):
             df = pd.read_excel(args.file, dtype=d_type)
             if not df.columns.isin(d_type.keys()).all():
                 raise TypeError("xlsx文件格式必须有{}四列".format(list(d_type.keys())))
-            for date, weight_data in df.groupby("TRADE_DT"):
-                if round(weight_data["TARGET_WEIGHT"].sum(), 6) > 1:
-                    raise ValueError("权重之和出错，请检查{}日的权重".format(date))
+            # for date, weight_data in df.groupby("TRADE_DT"):
+            #     if round(weight_data["TARGET_WEIGHT"].sum(), 6) > 1:
+            #         raise ValueError("权重之和出错，请检查{}日的权重".format(date))
             # 转换为米筐order_book_id
             df['TICKER'] = df['TICKER'].apply(lambda x: rqdatac.id_convert(x) if ".OF" not in x else x)
             return df
@@ -1565,6 +1717,7 @@ if __name__ == '__main__':
     
     ####常用指数
     #中证2000 '932000.INDX'
+    #中证红利 '000922.XSHG'
     #米筐微盘股 '866006.RI'
     # args.id1='000001.XSHG' #上证
     # args.id2='399106.XSHE' #深证
@@ -1580,9 +1733,13 @@ if __name__ == '__main__':
     # args.f=5
     # args.file=r'data/米筐微盘股macd周频.xlsx'
     
-    args.task='wpg_drop_study'
-    args.st='20170101'
-    args.et='20250321'
+    # args.task='wpg_drop_study'
+    # args.st='20170101'
+    # args.et='20250321'
+    
+    # args.task='wpg_hlg_return_study'
+    # args.st='20170101'
+    # args.et='20250321'
     
     # args.task='make_backtest_file2'
     # args.st='20200101'
@@ -1590,10 +1747,16 @@ if __name__ == '__main__':
     # args.f=1
     # args.file=r'data/米筐微盘股macd日频.xlsx'
     
+    # args.task='make_backtest_file3'
+    # args.st='20200101'
+    # args.et='20250321'
+    # args.f=1
+    # args.file=r'data/米筐微盘股红利股择时等权日频_1412月空仓.xlsx'
+    
     # args.task='backtest'
     # args.st='20200101'
     # args.et='20250319'
-    # args.file=r'data/米筐微盘股macd日频.xlsx'
+    # args.file=r'data/米筐微盘股红利股择时等权日频_1412月空仓.xlsx'
     
     # args.task='buy_sell'
     # args.method='MACD_2'
@@ -1624,23 +1787,29 @@ if __name__ == '__main__':
     
     # args.task='rq_wpg_make_pms_csv'
     # # args.et=rqdatac.get_latest_trading_date()
-    # args.et=pd.to_datetime('20250421')
+    # args.et=pd.to_datetime('20250430')
     # args.money=200e4
     
     # args.task='rq_wpg_adjust_ATX'
-    # args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'
-    # args.pms_file='PMS_csv/绝对收益信用_2025-04-21.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-04-22_1.csv'
-    # args.start_time='20250422T093000000'
-    # args.end_time=  '20250422T103000000'  
+    # args.pms_file='PMS_csv/共同target_2025-04-30.xlsx'
+    # args.start_time='20250506T093000000'
+    # args.end_time=  '20250506T103000000'  
+    
+    # # args.ATX_pos_file='ATX_csv/持仓查询百里挑一信用_20250506091847.xlsx'
+    # args.ATX_pos_file='ATX_csv/持仓查询绝对收益信用_20250506092055.xlsx'
+    
+    # # args.ATX_file='ATX_csv/ATX_stock_2025-05-06_百里挑一信用.csv'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-06_绝对收益信用.csv'
+    
+    # # args.account='百榕百里挑一稳健一号信用'
     # args.account='百榕全天候宏观对冲绝对收益信用'
-    # args.account='百榕百里挑一稳健一号信用'
+    
     
     # args.task='ATX_to_PMS_track'
-    # args.ATX_file='ATX_csv/成交查询_20250421152047.xlsx'
+    # args.ATX_file='ATX_csv/成交查询绝对收益_20250429095802.xls'
     
     # args.task='ATX_to_ATX_adjust'
-    # args.ATX_pos_file='ATX_csv/持仓查询_20250414151014.xlsx'
+    # args.ATX_pos_file='ATX_csv/持仓查询_百里挑一_20250429095335.xlsx'
     # args.ATX_file='ATX_csv/ATX_stock_2025-04-15_1.csv'
     # args.st='20250415T093000000'
     # args.et=  '20250415T103000000'  
@@ -1649,8 +1818,8 @@ if __name__ == '__main__':
     # args.task='crowdedness'
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
-    # args.st='20240101'
-    # args.et='20250418'
+    # args.st='20250401'
+    # args.et='20250507'
     
     # args.task='wpg_adjust_dif'
     # args.st='20240101'
@@ -1660,5 +1829,12 @@ if __name__ == '__main__':
     # args.et='20250410'
     
     # args.task='crowdedness_study'
+    
+    args.task='pick_st_sell'
+    args.ATX_pos_file='ATX_csv/持仓查询_20250508105218.xlsx'
+    args.ATX_file='ATX_csv/ATX_stock_2025-05-08.csv'
+    args.st='20250508T130000000'
+    args.et=  '20250508T131500000'  
+    args.ratio=0
     
     main(args)
