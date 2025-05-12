@@ -1780,28 +1780,27 @@ if __name__ == '__main__':
     # args.st='20210101'
     # args.et='20250410'
     
-    # args.task='wpg_macd_pred'
-    # args.st='20170101'
-    # args.et=rqdatac.get_latest_trading_date()
-    # args.file='signal/wpg_macd_pred.csv'
+    args.task='wpg_macd_pred'
+    args.st='20170101'
+    args.et='20250509'
+    args.file='signal/wpg_macd_pred.csv'
     
     # args.task='rq_wpg_make_pms_csv'
     # # args.et=rqdatac.get_latest_trading_date()
-    # args.et=pd.to_datetime('20250430')
+    # args.et=pd.to_datetime('20250509')
     # args.money=200e4
     
     # args.task='rq_wpg_adjust_ATX'
-    # args.pms_file='PMS_csv/共同target_2025-04-30.xlsx'
-    # args.start_time='20250506T093000000'
-    # args.end_time=  '20250506T103000000'  
+    # args.pms_file='PMS_csv/共同target_2025-05-09.xlsx'
+    # args.start_time='20250512T093000000'
+    # args.end_time=  '20250512T103000000'  
     
-    # # args.ATX_pos_file='ATX_csv/持仓查询百里挑一信用_20250506091847.xlsx'
-    # args.ATX_pos_file='ATX_csv/持仓查询绝对收益信用_20250506092055.xlsx'
+    # args.ATX_pos_file='ATX_csv/持仓查询百里挑一信用_20250509162227.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-12_百里挑一信用.csv'
+    # args.account='百榕百里挑一稳健一号信用'
     
-    # # args.ATX_file='ATX_csv/ATX_stock_2025-05-06_百里挑一信用.csv'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-05-06_绝对收益信用.csv'
-    
-    # # args.account='百榕百里挑一稳健一号信用'
+    # args.ATX_pos_file='ATX_csv/持仓查询绝对收益信用_20250509162155.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-12_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
     
@@ -1819,7 +1818,7 @@ if __name__ == '__main__':
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
     # args.st='20250401'
-    # args.et='20250507'
+    # args.et='20250509'
     
     # args.task='wpg_adjust_dif'
     # args.st='20240101'
@@ -1830,11 +1829,11 @@ if __name__ == '__main__':
     
     # args.task='crowdedness_study'
     
-    args.task='pick_st_sell'
-    args.ATX_pos_file='ATX_csv/持仓查询_20250508105218.xlsx'
-    args.ATX_file='ATX_csv/ATX_stock_2025-05-08.csv'
-    args.st='20250508T130000000'
-    args.et=  '20250508T131500000'  
-    args.ratio=0
+    # args.task='pick_st_sell'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250508105218.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-08.csv'
+    # args.st='20250508T130000000'
+    # args.et=  '20250508T131500000'  
+    # args.ratio=0
     
     main(args)
