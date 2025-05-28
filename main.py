@@ -665,12 +665,16 @@ def main(args):
         df['MACD_flag'] = False ##True代表该天空仓
         # 标记区间的开始和结束
         flag = False  
+        starts=[]
+        ends=[]
         for i in range(len(df)):
             index=df.index[i]
             if df.loc[index, 'MACD_signal']==-1 and not flag:
                 flag = True
+                starts.append(index)
             if df.loc[index, 'MACD_signal']==1 and flag:
                 flag = False
+                ends.append(index)
             if flag:
                 df.loc[index, 'MACD_flag'] = True
         df['MACD_flag']=df['MACD_flag'].shift(1)
@@ -682,17 +686,54 @@ def main(args):
             else:
                 return row['return']
         df['MACD_return']=df.apply(func2, axis=1)
+
+        lag=3
+        df['y']=df['close'].shift(-1*lag)/df['close']-1
+        df=df.dropna()
         
-        df=df['2017-06-01':]
+        # df=df['2017-06-01':]
         print(df.index[0],df.index[-1])
         
-        if df.index[-1].strftime('%Y%m%d')!=args.et.strftime('%Y%m%d'):
-            print('data is not the lastest!')
-        else:
-            print(f'save to {args.file}!')
-            df[['prev_close', 'volume', 'close', 'total_turnover',
-                'return','MACD', 'MACD_signal',
-                   'MACD_pct_change', 'MACD_flag']].iloc[-30:].to_csv(args.file)
+        #找出首次buy 和 sell 信号
+        def func4(window):
+            if window[0]==0 and window[1]==1:
+                return 1
+            elif window[0]==0 and window[1]==-1:
+                return -1
+            else:
+                return 0
+        df['MACD_first_signal'] = df['MACD_signal'].rolling(window=2, min_periods=2).apply(func4)
+        
+        
+        gaps=list(zip(starts,ends))
+        res=[]
+        for i in gaps:
+            if i[0].year in [2025]:
+                print(i[0].year)
+                # continue
+                close0=df.loc[i[0], 'close']
+                close1=df.loc[i[1], 'close']
+                r=close1/close0-1
+                res.append(r)
+        res=pd.DataFrame(res,columns=['return'])
+        ratio=len(res[res['return']<0])/len(res)
+        print(ratio)
+        xx=1
+        # df1=df[df['MACD_first_signal']==1]
+        # plt.scatter(df1['MACD'],df1['y'])
+        # plt.show()
+        
+        # df2=df[df['MACD_first_signal']==-1]
+        # plt.scatter(df2['MACD'],df2['y'])
+        # plt.show()
+        
+        # if df.index[-1].strftime('%Y%m%d')!=args.et.strftime('%Y%m%d'):
+        #     print('data is not the lastest!')
+        # else:
+        #     print(f'save to {args.file}!')
+        #     df[['prev_close', 'volume', 'close', 'total_turnover',
+        #         'return','MACD', 'MACD_signal',
+        #            'MACD_pct_change', 'MACD_flag']].iloc[-30:].to_csv(args.file)
 
 
     ####wpg_market_value_median 查看微盘股市值中位数
@@ -834,7 +875,7 @@ def main(args):
         df=df[df['调整股数']!=0]
         
         df['算法类型']='TWAP'
-        df['账户名称']='百榕全天候宏观对冲绝对收益信用'
+        df['账户名称']=args.account
         df['算法实例']='kf_twap_plus'
         df['证券代码']=df['证券代码']
         df['交易方向']=df['调整股数'].apply(lambda x:'买入' if x>0 else '卖出')
@@ -1111,6 +1152,19 @@ def main(args):
                                         maxmin=True)
         xx=a
 
+    ####wpg_liquidity 微盘股流动性
+    if args.task=='wpg_liquidity':   
+        # 存款准备金率
+        reserve_ratio=rqdatac.econ.get_reserve_ratio(reserve_type='major',start_date='20150101',end_date='20250526')
+        # 融资融券
+        margin =rqdatac.get_securities_margin(['XSHE', 'XSHG'],
+                                              start_date='20200101', end_date='20250526', 
+                                              fields='margin_balance')
+        margin.index = margin.index.get_level_values(1)
+        # M1,M2..
+        money=rqdatac.econ.get_money_supply(start_date='20200101', end_date='20250526')
+        money['m1-m2-yoy']=money['m1_growth_yoy']-money['m2_growth_yoy']
+        
     ####buy_sell逃顶抄底信号实验
     if args.task=='buy_sell':   
         ##微盘股和中证2000
@@ -1780,39 +1834,47 @@ if __name__ == '__main__':
     # args.st='20210101'
     # args.et='20250410'
     
-    args.task='wpg_macd_pred'
-    args.st='20170101'
-    args.et='20250509'
-    args.file='signal/wpg_macd_pred.csv'
+    # args.task='wpg_macd_pred'
+    # args.st='20170101'
+    # args.et='20250509'
+    # args.file='signal/wpg_macd_pred.csv'
     
     # args.task='rq_wpg_make_pms_csv'
     # # args.et=rqdatac.get_latest_trading_date()
-    # args.et=pd.to_datetime('20250509')
+    # args.et=pd.to_datetime('20250523')
     # args.money=200e4
     
     # args.task='rq_wpg_adjust_ATX'
-    # args.pms_file='PMS_csv/共同target_2025-05-09.xlsx'
-    # args.start_time='20250512T093000000'
-    # args.end_time=  '20250512T103000000'  
+    # args.pms_file='PMS_csv/共同target_2025-05-23.xlsx'
+    # args.start_time='20250526T093000000'
+    # args.end_time=  '20250526T103000000'  
     
-    # args.ATX_pos_file='ATX_csv/持仓查询百里挑一信用_20250509162227.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-05-12_百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询百里挑一信用_20250523153324.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-26_百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
-    # args.ATX_pos_file='ATX_csv/持仓查询绝对收益信用_20250509162155.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-05-12_绝对收益信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询绝对收益信用_20250523153502.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-26_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
     
     # args.task='ATX_to_PMS_track'
     # args.ATX_file='ATX_csv/成交查询绝对收益_20250429095802.xls'
     
-    # args.task='ATX_to_ATX_adjust'
-    # args.ATX_pos_file='ATX_csv/持仓查询_百里挑一_20250429095335.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-04-15_1.csv'
-    # args.st='20250415T093000000'
-    # args.et=  '20250415T103000000'  
-    # args.ratio=0
+    args.task='ATX_to_ATX_adjust'
+    args.st='20250527T093000000'
+    args.et='20250527T103000000'  
+    args.ratio=0
+    
+    # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250526174947.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_百里挑一信用.csv'
+    # args.account='百榕百里挑一稳健一号信用'
+    
+    args.ATX_pos_file='ATX_csv/全天候持仓查询_20250526174918.xlsx'
+    args.ATX_file='ATX_csv/ATX_stock_2025-05-27_绝对收益信用.csv'
+    args.account='百榕全天候宏观对冲绝对收益信用'
+    
+    
     
     # args.task='crowdedness'
     # args.id1='000001.XSHG'

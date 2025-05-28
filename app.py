@@ -37,9 +37,9 @@ canvas = tk.Canvas(root, width=w, height=h)
 canvas.pack()
 
 # 在画布上画直线
-line1 = canvas.create_line(w/2, h*0.6, w/2, h*0.07, fill="black", width=1)
+line1 = canvas.create_line(w/2, h*1.0, w/2, h*0.07, fill="black", width=1)
 line2 = canvas.create_line(0, h*0.07, w, h*0.07, fill="black", width=1)
-line3 = canvas.create_line(0, h*0.6, w, h*0.6, fill="black", width=1)
+line3 = canvas.create_line(0, h*0.5, w, h*0.5, fill="black", width=1)
 
 ###############################第一行
 # 输入待评估日期
@@ -65,6 +65,8 @@ button2.place(x=w*0.45,y=h*0.02,width=150,height=25)
 # 计算
 def cacl1():
     date = text1.get("1.0", tk.END).strip()
+
+##############################################################拥挤度
     r1=rqdatac.get_price(order_book_ids='000001.XSHG', 
               start_date=date, 
               end_date=date, 
@@ -96,7 +98,8 @@ def cacl1():
     label4.config(text=f"微盘股成交额:{wpg_turnover}")
     label5.config(text=f"拥挤度:{crowdedness}")
     label6.config(text=f"拥挤度历史百分位:{percent}")
-    
+
+##############################################################MACD    
     df=rqdatac.get_price(order_book_ids='866006.RI', 
               start_date='20250101', 
               end_date=date, 
@@ -158,6 +161,28 @@ def cacl1():
     
     tree.place(x=w*0.52,y=h*0.15,width=600)
     
+##############################################################微盘-红利涨幅
+    dates=rqdatac.get_trading_dates(start_date='20250101', end_date=date)
+    dates=dates[-30:]
+    wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+              start_date=dates[0], 
+              end_date=date, 
+              frequency='1d', 
+              fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+              expect_df=True,time_slice=None)  
+    hlg=rqdatac.get_price(order_book_ids='000922.XSHG', 
+              start_date=dates[0], 
+              end_date=date, 
+              frequency='1d', 
+              fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+              expect_df=True,time_slice=None)  
+    
+    wpg_return30=wpg['close'].iloc[-1]/wpg['close'].iloc[0]-1
+    hlg_return30=hlg['close'].iloc[-1]/hlg['close'].iloc[0]-1
+    wpg_hlg_dif=round(wpg_return30-hlg_return30,3)
+    
+    label8.config(text=f"微盘-红利涨幅(30天):{wpg_hlg_dif}")
+    
     
 button1 = tk.Button(root, text="点击开始计算", command=cacl1)
 button1.place(x=w*0.7,y=h*0.02,width=150,height=25)
@@ -176,13 +201,6 @@ label2.place(x=w*0.75-50,y=h*0.08,width=100,height=25)
 label3 = tk.Label(root, text="两市总成交额", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
 label3.place(x=w*0.00,y=h*0.15,width=250)
 
-# macd指标
-  
-    
-    
-# text2 = tk.Text(root)
-# text2.insert(tk.END, df.to_csv(sep='\t', na_rep='nan'))
-# text2.place(x=w*0.5,y=h*0.15,width=250)
 
 ###############################第四行
 # 微盘股成交额
@@ -199,8 +217,15 @@ label5.place(x=w*0.00,y=h*0.25,width=250)
 label6 = tk.Label(root, text="拥挤度历史百分位", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
 label6.place(x=w*0.00,y=h*0.30,width=250)
 
+###############################第七行
+# 微盘-红利轮动指标
+label7 = tk.Label(root, text="微盘-红利轮动指标", borderwidth=1, relief="raised", font=("Arial", 16, "bold"))
+label7.place(x=w*0.25-100,y=h*0.52,width=200,height=25)
 
-
+###############################第八行
+# 拥挤度历史百分位
+label8 = tk.Label(root, text="微盘-红利涨幅(30天)", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
+label8.place(x=w*0.00,y=h*0.58,width=250)
 
 # 运行主循环
 
