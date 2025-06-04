@@ -1107,6 +1107,119 @@ def main(args):
         st.to_csv(args.ATX_file,index=False)        
         
         
+    ####crowdedness2 机器人指数拥挤度
+    if args.task=='crowdedness2':   
+        
+        #机器人指数拥挤度
+        dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
+        res=[] ##存每天的微盘股拥挤度
+        for date in tqdm(dates):        
+            r1=rqdatac.get_price(order_book_ids=args.id1, 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            r2=rqdatac.get_price(order_book_ids=args.id2, 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            wpg=rqdatac.get_price(order_book_ids='980022.INDX', 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            
+            wpg_turnover=wpg['total_turnover'].iloc[0]
+            total_turnover=r1['total_turnover'].iloc[0]+r2['total_turnover'].iloc[0]
+            crowdedness=wpg_turnover/total_turnover
+            res.append(crowdedness)
+            
+        wpg=rqdatac.get_price(order_book_ids='980022.INDX', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)     
+        wpg.index = wpg.index.get_level_values(1)
+        wpg['crowdedness']=res
+        Plot.plot_res(wpg,'',cols = ['close','crowdedness'],start_time = wpg.index[0],
+                                        end_time=wpg.index[-1],
+                                        days = None,
+                                        maxmin=True)
+        xx=a
+        
+    ####hthg_index 华泰宏观经济日频指标
+    if args.task=='hthg_index':   
+        df=pd.read_csv('wind_csv/华泰宏观经济日频指标.csv',skiprows=[1,2,3,4],index_col=['指标名称'],parse_dates=True)
+        df=df['20160101':]
+        df=df.fillna(method='ffill').fillna(method='bfill')    
+        
+        df['铜金比']=df['期货收盘价(连续):COMEX铜']/df['期货收盘价(连续):COMEX黄金']
+        df['铜金比_ewm']=df['铜金比'].ewm(span=364).mean()
+        
+        df['波罗的海干散货指数']=df['波罗的海干散货指数(BDI)']
+        df['波罗的海干散货指数_ma']=df['波罗的海干散货指数'].rolling(window=28).mean()
+       
+        df['PTA平均产业链负荷率']=(df['中国:开工率:精对苯二甲酸:PTA工厂']+df['中国:开工率:精对苯二甲酸:聚酯工厂']+df['中国:开工率:精对苯二甲酸:江浙织机'])/3
+        df['PTA平均产业链负荷率_ma']=df['PTA平均产业链负荷率'].rolling(window=28).mean()
+        
+        df['建材综合指数']=df['中国:建材综合指数']
+        df['建材综合指数_ma']=df['建材综合指数'].rolling(window=28).mean()
+        
+        df['秦皇岛港煤炭吞吐量']=df['秦皇岛港:煤炭调度:港口吞吐量']
+        df['秦皇岛港煤炭吞吐量_ma']=df['秦皇岛港煤炭吞吐量'].rolling(window=28).mean()
+        
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date='20150101', 
+                  end_date='20250603', 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)     
+        wpg.index = wpg.index.get_level_values(1)  
+        wpg=wpg[['close']]
+        df=df.join(wpg)
+        df=df.fillna(method='ffill').fillna(method='bfill')    
+        
+        Plot.plot_res(df,'',cols = ['close','铜金比_ewm','波罗的海干散货指数_ma','PTA平均产业链负荷率_ma','建材综合指数_ma','秦皇岛港煤炭吞吐量_ma'],start_time = df.index[0],
+                                        end_time=df.index[-1],
+                                        days = None,
+                                        maxmin=True)
+        xx=a
+        
+    ####htldx_index 华泰流动性日频指标
+    if args.task=='htldx_index':   
+        df=pd.read_csv('wind_csv/华泰流动性维度指标.csv',skiprows=[1,2,3,4],index_col=['指标名称'],parse_dates=True)
+        df=df['20160101':]
+        df=df.fillna(method='ffill').fillna(method='bfill')    
+        
+        
+        df['银行间质押式回购加权利率']=df['中国:银行间质押式回购加权利率:7天']
+        df['银行间质押式回购加权利率_ewm']=df['银行间质押式回购加权利率'].ewm(span=364).mean()
+        
+        df['SHIBOR']=df['SHIBOR:3个月']
+        df['SHIBOR_ewm']=df['SHIBOR'].ewm(span=364).mean()
+        
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date='20150101', 
+                  end_date='20250603', 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)     
+        wpg.index = wpg.index.get_level_values(1)  
+        wpg=wpg[['close']]
+        df=df.join(wpg)
+        df=df.fillna(method='ffill').fillna(method='bfill')    
+        
+        Plot.plot_res(df,'',cols = ['close','银行间质押式回购加权利率_ewm','SHIBOR_ewm'],start_time = df.index[0],
+                                        end_time=df.index[-1],
+                                        days = None,
+                                        maxmin=True)
+        xx=a
+        
     ####crowdedness 微盘股拥挤度
     if args.task=='crowdedness':   
         
@@ -1164,6 +1277,38 @@ def main(args):
         # M1,M2..
         money=rqdatac.econ.get_money_supply(start_date='20200101', end_date='20250526')
         money['m1-m2-yoy']=money['m1_growth_yoy']-money['m2_growth_yoy']
+
+    ####a_hk A股-港股涨幅，20天
+    if args.task=='a_hk':   
+        date='20250527'
+        dates=rqdatac.get_trading_dates(start_date='20200101', end_date=date)
+        res=[]
+        
+        for date in tqdm(dates):
+            dates2=rqdatac.get_trading_dates(start_date='20190101', end_date=date)
+            dates2=dates2[-20:]
+            wpg=rqdatac.get_price(order_book_ids='000002.XSHG', 
+                      start_date=dates2[0], 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)  
+            hlg=rqdatac.get_price(order_book_ids='930930.INDX', 
+                      start_date=dates2[0], 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)  
+            
+            wpg_return30=wpg['close'].iloc[-1]/wpg['close'].iloc[0]-1
+            hlg_return30=hlg['close'].iloc[-1]/hlg['close'].iloc[0]-1
+            wpg_hlg_dif=wpg_return30-hlg_return30
+            res.append(wpg_hlg_dif)
+        
+        res=pd.DataFrame(res,columns=['wpg_hlg_dif'])
+        res = res.replace([-np.inf], np.nan).dropna()
+        res=res[res['wpg_hlg_dif']<0.5]
+        plt.plot(res['wpg_hlg_dif'])
         
     ####buy_sell逃顶抄底信号实验
     if args.task=='buy_sell':   
@@ -1773,6 +1918,9 @@ if __name__ == '__main__':
     #中证2000 '932000.INDX'
     #中证红利 '000922.XSHG'
     #米筐微盘股 '866006.RI'
+    # A股指数 '000002.XSHG'
+    # 中证港股通综合指数 '930930.INDX'
+    # 国证机器人产业指数 '980022.INDX'
     # args.id1='000001.XSHG' #上证
     # args.id2='399106.XSHE' #深证
     
@@ -1839,6 +1987,10 @@ if __name__ == '__main__':
     # args.et='20250509'
     # args.file='signal/wpg_macd_pred.csv'
     
+    # args.task='hthg_index'
+    
+    args.task='htldx_index'
+    
     # args.task='rq_wpg_make_pms_csv'
     # # args.et=rqdatac.get_latest_trading_date()
     # args.et=pd.to_datetime('20250523')
@@ -1861,18 +2013,18 @@ if __name__ == '__main__':
     # args.task='ATX_to_PMS_track'
     # args.ATX_file='ATX_csv/成交查询绝对收益_20250429095802.xls'
     
-    args.task='ATX_to_ATX_adjust'
-    args.st='20250527T093000000'
-    args.et='20250527T103000000'  
-    args.ratio=0
+    # args.task='ATX_to_ATX_adjust'
+    # args.st='20250527T093000000'
+    # args.et='20250527T103000000'  
+    # args.ratio=0
     
-    # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250526174947.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_百里挑一信用.csv'
-    # args.account='百榕百里挑一稳健一号信用'
+    # # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250526174947.xlsx'
+    # # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_百里挑一信用.csv'
+    # # args.account='百榕百里挑一稳健一号信用'
     
-    args.ATX_pos_file='ATX_csv/全天候持仓查询_20250526174918.xlsx'
-    args.ATX_file='ATX_csv/ATX_stock_2025-05-27_绝对收益信用.csv'
-    args.account='百榕全天候宏观对冲绝对收益信用'
+    # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250526174918.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_绝对收益信用.csv'
+    # args.account='百榕全天候宏观对冲绝对收益信用'
     
     
     
@@ -1881,6 +2033,12 @@ if __name__ == '__main__':
     # args.id2='399106.XSHE'
     # args.st='20250401'
     # args.et='20250509'
+    
+    # args.task='crowdedness2'
+    # args.id1='000001.XSHG'
+    # args.id2='399106.XSHE'
+    # args.st='20250501'
+    # args.et='20250603'
     
     # args.task='wpg_adjust_dif'
     # args.st='20240101'
