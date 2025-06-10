@@ -1035,30 +1035,70 @@ def main(args):
         res=pd.DataFrame(res,columns=['date','21day_return'])
         xx=1
 
-    ####crowdedness_study 微盘股拥挤度研究
+    ####crowdedness_study 拥挤度门限测试
     if args.task=='crowdedness_study':   
-        df=pd.read_csv('data/wpg_crowdedness.csv',index_col=0,parse_dates=True)
+        
+        r1=rqdatac.get_price(order_book_ids=args.id1, 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        r2=rqdatac.get_price(order_book_ids=args.id2, 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        
+        r1.index = r1.index.get_level_values(1)
+        r2.index = r2.index.get_level_values(1)
+        wpg.index = wpg.index.get_level_values(1)
+        
+        res=wpg['total_turnover']/(r1['total_turnover']+r2['total_turnover'])
+        res.name='crowdedness'
+        res=res.to_frame()
+        
+        days=args.w*252
+        res=res.iloc[-days:]
+        
         from scipy.stats import percentileofscore
-        df=df['2020-01-01':]
-        df['crowdedness_percent'] = [percentileofscore(df['crowdedness'], v) for v in df['crowdedness']]
-        # plt.plot(df['crowdedness'])
+        res['crowdedness_percent'] = [percentileofscore(res['crowdedness'], v) for v in res['crowdedness']]
+        res=res.join(wpg[['close']])
         
-        lag=99
-        df['y']=df['close'].shift(-1*lag)/df['close']-1
-        df2=df.dropna()
-        df2.to_csv('data/wpg_crowdedness_percent.csv')
-        plt.scatter(list(df2['crowdedness_percent']),list(df2['y']))
-        plt.xlabel('Crowdedness')
-        plt.ylabel(f'未来{lag}天涨幅')
+        res['y']=res['close'].shift(-1*args.t)/res['close']-1
+        res=res.dropna()
+        
+        res=res.sort_values(['crowdedness_percent'],ascending=True)
+        res['bucket'] = pd.cut(res['crowdedness_percent'], 
+                              bins=np.linspace(0, 100, 101),  # 创建100个等宽区间
+                              labels=range(100),  # 桶标签0-99
+                              include_lowest=True)  # 包含最小值
+         
+        # 按桶分组并计算y的均值
+        bucket_means = res.groupby('bucket')['y'].mean().reset_index()
+         
+        # 绘制柱状图
+        plt.figure(figsize=(16, 8))
+         
+        # 绘制柱状图
+        bars = plt.bar(bucket_means['bucket'], bucket_means['y'], 
+                      width=1,  # 每个桶宽度为1
+                      edgecolor='black', 
+                      linewidth=0.5)
+         
+        # 设置标题和标签
+        plt.title('每个拥挤度百分位桶的平均y值', fontsize=16)
+        plt.xlabel('拥挤度百分位桶', fontsize=12)
+        plt.ylabel('y的平均值', fontsize=12)
         plt.show()
-        # corr=df2['y'].corr(df2['crowdedness_percent'])
         
-        
-        # for lag in range(1,360):
-        #     df['y']=df['close'].shift(-1*lag)/df['close']-1
-        #     df2=df.dropna()
-        #     corr=df2['y'].corr(df2['crowdedness_percent'])
-        #     print(f'{lag}-{corr}')
         xx=1
         
         
@@ -1107,50 +1147,7 @@ def main(args):
         st.to_csv(args.ATX_file,index=False)        
         
         
-    ####crowdedness2 机器人指数拥挤度
-    if args.task=='crowdedness2':   
-        
-        #机器人指数拥挤度
-        dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
-        res=[] ##存每天的微盘股拥挤度
-        for date in tqdm(dates):        
-            r1=rqdatac.get_price(order_book_ids=args.id1, 
-                      start_date=date, 
-                      end_date=date, 
-                      frequency='1d', 
-                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                      expect_df=True,time_slice=None)
-            r2=rqdatac.get_price(order_book_ids=args.id2, 
-                      start_date=date, 
-                      end_date=date, 
-                      frequency='1d', 
-                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                      expect_df=True,time_slice=None)
-            wpg=rqdatac.get_price(order_book_ids='980022.INDX', 
-                      start_date=date, 
-                      end_date=date, 
-                      frequency='1d', 
-                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                      expect_df=True,time_slice=None)
-            
-            wpg_turnover=wpg['total_turnover'].iloc[0]
-            total_turnover=r1['total_turnover'].iloc[0]+r2['total_turnover'].iloc[0]
-            crowdedness=wpg_turnover/total_turnover
-            res.append(crowdedness)
-            
-        wpg=rqdatac.get_price(order_book_ids='980022.INDX', 
-                  start_date=args.st, 
-                  end_date=args.et, 
-                  frequency='1d', 
-                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                  expect_df=True,time_slice=None)     
-        wpg.index = wpg.index.get_level_values(1)
-        wpg['crowdedness']=res
-        Plot.plot_res(wpg,'',cols = ['close','crowdedness'],start_time = wpg.index[0],
-                                        end_time=wpg.index[-1],
-                                        days = None,
-                                        maxmin=True)
-        xx=a
+
         
     ####hthg_index 华泰宏观经济日频指标
     if args.task=='hthg_index':   
@@ -1263,6 +1260,99 @@ def main(args):
                                         end_time=wpg.index[-1],
                                         days = None,
                                         maxmin=True)
+        xx=a
+
+    ####crowdedness2 机器人指数拥挤度
+    if args.task=='crowdedness2':   
+        
+        #机器人指数拥挤度
+        dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
+        res=[] ##存每天的微盘股拥挤度
+        for date in tqdm(dates):        
+            r1=rqdatac.get_price(order_book_ids=args.id1, 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            r2=rqdatac.get_price(order_book_ids=args.id2, 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            wpg=rqdatac.get_price(order_book_ids='980022.INDX', 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            
+            wpg_turnover=wpg['total_turnover'].iloc[0]
+            total_turnover=r1['total_turnover'].iloc[0]+r2['total_turnover'].iloc[0]
+            crowdedness=wpg_turnover/total_turnover
+            res.append(crowdedness)
+            
+        wpg=rqdatac.get_price(order_book_ids='980022.INDX', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)     
+        wpg.index = wpg.index.get_level_values(1)
+        wpg['crowdedness']=res
+        Plot.plot_res(wpg,'',cols = ['close','crowdedness'],start_time = wpg.index[0],
+                                        end_time=wpg.index[-1],
+                                        days = None,
+                                        maxmin=True)
+        xx=a
+        
+    ####crowdedness3 小市值组的T日动量mS减去大市值组的T日动量mL，T取5/10/20/30/40/50/60
+    if args.task=='crowdedness3':   
+        
+        dpg=rqdatac.get_price(order_book_ids='000510.XSHG', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        
+        dpg.index = dpg.index.get_level_values(1)
+        wpg.index = wpg.index.get_level_values(1)
+        
+        # Ts = [5, 10, 20, 30, 40, 50, 60]  
+        Ts = [20]  
+        def calculate_momentum(df, T):
+            """计算T日动量（收益率）"""
+            return (df['close'] - df['close'].shift(T)) / df['close'].shift(T)
+        
+        # 计算大盘股动量序列
+        mL_series = {T: calculate_momentum(dpg, T) for T in Ts}
+        # 计算微盘股动量序列
+        mS_series = {T: calculate_momentum(wpg, T) for T in Ts}
+        
+        momentum_diff = {}
+        for T in Ts:
+            # 对齐时间索引（确保同一天数据相减）
+            merged = pd.DataFrame({'mS': mS_series[T], 'mL': mL_series[T]}).dropna()
+            momentum_diff[T] = merged['mS'] - merged['mL']
+        
+        res = pd.concat(
+            [momentum_diff[T].rename(f'T={T}') for T in Ts],
+            axis=1
+        )
+        
+        res=res['20240101':]
+        Plot.plot_res(res,'',cols = [f'T={T}' for T in Ts],start_time = res.index[0],
+                                        end_time=res.index[-1],
+                                        days = None,
+                                        maxmin=False)
         xx=a
 
     ####wpg_liquidity 微盘股流动性
@@ -1921,6 +2011,8 @@ if __name__ == '__main__':
     # A股指数 '000002.XSHG'
     # 中证港股通综合指数 '930930.INDX'
     # 国证机器人产业指数 '980022.INDX'
+    # 中证A500 '000510.XSHG'
+    
     # args.id1='000001.XSHG' #上证
     # args.id2='399106.XSHE' #深证
     
@@ -1989,7 +2081,7 @@ if __name__ == '__main__':
     
     # args.task='hthg_index'
     
-    args.task='htldx_index'
+    # args.task='htldx_index'
     
     # args.task='rq_wpg_make_pms_csv'
     # # args.et=rqdatac.get_latest_trading_date()
@@ -2038,7 +2130,11 @@ if __name__ == '__main__':
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
     # args.st='20250501'
-    # args.et='20250603'
+    # args.et='20250609'
+    
+    # args.task='crowdedness3'
+    # args.st='20230101'
+    # args.et='20250609'
     
     # args.task='wpg_adjust_dif'
     # args.st='20240101'
@@ -2047,7 +2143,13 @@ if __name__ == '__main__':
     # args.task='wpg_market_value_median'
     # args.et='20250410'
     
-    # args.task='crowdedness_study'
+    args.task='crowdedness_study'
+    args.id1='000001.XSHG'
+    args.id2='399106.XSHE'
+    args.st='20200101'
+    args.et='20250609'
+    args.w=5
+    args.t=20
     
     # args.task='pick_st_sell'
     # args.ATX_pos_file='ATX_csv/持仓查询_20250508105218.xlsx'
