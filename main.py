@@ -949,6 +949,46 @@ def main(args):
         xx=1
 
 
+    ####wpg_hlg 微盘-红利涨幅
+    if args.task=='wpg_hlg':   
+        dates=rqdatac.get_trading_dates(start_date='20200101', end_date='20250101')
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=dates[0], 
+                  end_date=dates[-1], 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)  
+        hlg=rqdatac.get_price(order_book_ids='000922.XSHG', 
+                  start_date=dates[0], 
+                  end_date=dates[-1], 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)  
+
+        wpg.index = wpg.index.get_level_values(1)
+        hlg.index = hlg.index.get_level_values(1)
+        T=30
+        hlg['hlg_moment']=(hlg['close'] - hlg['close'].shift(T)) / hlg['close'].shift(T)
+        wpg['wpg_moment']=(wpg['close'] - wpg['close'].shift(T)) / wpg['close'].shift(T)
+        
+        res=wpg[['close','wpg_moment']].join(hlg['hlg_moment'])
+        res['crowdedness']=res['wpg_moment']-res['hlg_moment']
+
+        res=res.dropna()
+
+        from scipy.stats import percentileofscore
+        res['crowdedness_percent'] = [percentileofscore(res['crowdedness'], v) for v in res['crowdedness']]
+        
+        res=res.sort_values(['crowdedness_percent'],ascending=True)
+        res.to_csv('data/wpg-hlg_percent.csv')
+        x=a
+        
+        
+        
+        
+        
+        
+        
     ####wpg_hlg_return_study 微盘股和红利股每月收益研究
     if args.task=='wpg_hlg_return_study':   
         wpg=rqdatac.get_price(order_book_ids='866006.RI', 
@@ -1035,8 +1075,8 @@ def main(args):
         res=pd.DataFrame(res,columns=['date','21day_return'])
         xx=1
 
-    ####crowdedness_study 拥挤度门限测试
-    if args.task=='crowdedness_study':   
+    ####crowdedness_study1 拥挤度门限测试
+    if args.task=='crowdedness_study1':   
         
         r1=rqdatac.get_price(order_book_ids=args.id1, 
                   start_date=args.st, 
@@ -1085,23 +1125,141 @@ def main(args):
         bucket_means = res.groupby('bucket')['y'].mean().reset_index()
          
         # 绘制柱状图
-        plt.figure(figsize=(16, 8))
+        plt.figure(figsize=(20, 8))
          
         # 绘制柱状图
         bars = plt.bar(bucket_means['bucket'], bucket_means['y'], 
                       width=1,  # 每个桶宽度为1
                       edgecolor='black', 
                       linewidth=0.5)
+        dense_ticks = np.arange(0, 101, 1)  # 70到100，每5个单位
+        plt.xticks(dense_ticks, dense_ticks)
+        plt.xticks(rotation=90)
+        
+    ####crowdedness_study2 动量，小-大市值，门限测试
+    if args.task=='crowdedness_study2':   
+        
+        dpg=rqdatac.get_price(order_book_ids='000510.XSHG', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        
+        dpg.index = dpg.index.get_level_values(1)
+        wpg.index = wpg.index.get_level_values(1)
+        T=40
+        dpg['dpg_moment40']=(dpg['close'] - dpg['close'].shift(T)) / dpg['close'].shift(T)
+        wpg['wpg_moment40']=(wpg['close'] - wpg['close'].shift(T)) / wpg['close'].shift(T)
+        
+        res=wpg[['close','wpg_moment40']].join(dpg['dpg_moment40'])
+        res['crowdedness']=res['wpg_moment40']-res['dpg_moment40']
+
+        days=args.w*252
+        res=res.iloc[-days:]
+        
+
+        from scipy.stats import percentileofscore
+        res['crowdedness_percent'] = [percentileofscore(res['crowdedness'], v) for v in res['crowdedness']]
+        
+        res['y']=res['close'].shift(-1*args.t)/res['close']-1
+        res=res.dropna()
+        
+        res=res.sort_values(['crowdedness_percent'],ascending=True)
+        res['bucket'] = pd.cut(res['crowdedness_percent'], 
+                              bins=np.linspace(0, 100, 101),  # 创建100个等宽区间
+                              labels=range(100),  # 桶标签0-99
+                              include_lowest=True)  # 包含最小值
          
-        # 设置标题和标签
-        plt.title('每个拥挤度百分位桶的平均y值', fontsize=16)
-        plt.xlabel('拥挤度百分位桶', fontsize=12)
-        plt.ylabel('y的平均值', fontsize=12)
-        plt.show()
+        # 按桶分组并计算y的均值
+        bucket_means = res.groupby('bucket')['y'].mean().reset_index()
+         
+        # 绘制柱状图
+        plt.figure(figsize=(20, 8))
+         
+        # 绘制柱状图
+        bars = plt.bar(bucket_means['bucket'], bucket_means['y'], 
+                      width=1,  # 每个桶宽度为1
+                      edgecolor='black', 
+                      linewidth=0.5)
+        dense_ticks = np.arange(0, 101, 1)  # 70到100，每5个单位
+        plt.xticks(dense_ticks, dense_ticks)
+        plt.xticks(rotation=90)
         
-        xx=1
+    ####crowdedness_study3 ，基差 门限测试
+    if args.task=='crowdedness_study3':   
         
+        # IM_basis=rqdatac.futures.get_dominant_price(underlying_symbols='IM',
+        #                                     start_date=args.st,
+        #                                     end_date=args.et,
+        #                                     frequency='1d',fields=None,adjust_type='pre', adjust_method='prev_close_spread')
         
+        # # IM_basis=rqdatac.futures.get_basis(order_book_ids='IM2506', 
+        # #                                 start_date=args.st, 
+        # #                                 end_date=args.et,
+        # #                                 fields=None,frequency='1d')
+
+        
+        # IM_basis.index = IM_basis.index.get_level_values(1)
+        # def func1(row):
+        #     xx=rqdatac.futures.get_basis(order_book_ids=row.dominant_id, 
+        #                             start_date=row.name, 
+        #                             end_date=row.name,
+        #                             fields=None,frequency='1d')
+        #     return xx['basis_rate'].iloc[0]
+        
+        # IM_basis['basis']=IM_basis.apply(func1,axis=1)
+        # IM_basis.to_csv('data/IM_basis.csv')
+        
+        IM_basis=pd.read_csv('data/IM_basis.csv',index_col=0,parse_dates=True)
+        
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        wpg.index = wpg.index.get_level_values(1)
+        
+        days=args.w*252
+        res=IM_basis.iloc[-days:]
+        res['crowdedness']=res['basis'] 
+
+        from scipy.stats import percentileofscore
+        res['crowdedness_percent'] = [percentileofscore(res['crowdedness'], v) for v in res['crowdedness']]
+        res=res[['crowdedness','crowdedness_percent']].join(wpg[['close']])
+        
+        res['y']=res['close'].shift(-1*args.t)/res['close']-1
+        res=res.dropna()
+        
+        res=res.sort_values(['crowdedness_percent'],ascending=True)
+        res['bucket'] = pd.cut(res['crowdedness_percent'], 
+                              bins=np.linspace(0, 100, 101),  # 创建100个等宽区间
+                              labels=range(100),  # 桶标签0-99
+                              include_lowest=True)  # 包含最小值
+         
+        # 按桶分组并计算y的均值
+        bucket_means = res.groupby('bucket')['y'].mean().reset_index()
+         
+        # 绘制柱状图
+        plt.figure(figsize=(20, 8))
+         
+        # 绘制柱状图
+        bars = plt.bar(bucket_means['bucket'], bucket_means['y'], 
+                      width=1,  # 每个桶宽度为1
+                      edgecolor='black', 
+                      linewidth=0.5)
+        dense_ticks = np.arange(0, 101, 1)  # 70到100，每5个单位
+        plt.xticks(dense_ticks, dense_ticks)
+        plt.xticks(rotation=90)
+        
+        x=a
     ####pick_st_sell 找出st的票然后清掉
     if args.task=='pick_st_sell':   
         df=pd.read_excel(args.ATX_pos_file,dtype=str)
@@ -2012,6 +2170,7 @@ if __name__ == '__main__':
     # 中证港股通综合指数 '930930.INDX'
     # 国证机器人产业指数 '980022.INDX'
     # 中证A500 '000510.XSHG'
+    # H50066.XSHG,"09:31-11:30,13:01-15:00",0.0,沪港AH溢价
     
     # args.id1='000001.XSHG' #上证
     # args.id2='399106.XSHE' #深证
@@ -2030,6 +2189,9 @@ if __name__ == '__main__':
     # args.task='wpg_drop_study'
     # args.st='20170101'
     # args.et='20250321'
+    
+    args.task='wpg_hlg'
+    
     
     # args.task='wpg_hlg_return_study'
     # args.st='20170101'
@@ -2129,8 +2291,8 @@ if __name__ == '__main__':
     # args.task='crowdedness2'
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
-    # args.st='20250501'
-    # args.et='20250609'
+    # args.st='20250101'
+    # args.et='20250611'
     
     # args.task='crowdedness3'
     # args.st='20230101'
@@ -2143,13 +2305,19 @@ if __name__ == '__main__':
     # args.task='wpg_market_value_median'
     # args.et='20250410'
     
-    args.task='crowdedness_study'
-    args.id1='000001.XSHG'
-    args.id2='399106.XSHE'
-    args.st='20200101'
-    args.et='20250609'
-    args.w=5
-    args.t=20
+    # args.task='crowdedness_study1'
+    # args.id1='000001.XSHG'
+    # args.id2='399106.XSHE'
+    # args.st='20200101'
+    # args.et='20250609'
+    # args.w=5
+    # args.t=20
+    
+    # args.task='crowdedness_study3'
+    # args.st='20200101'
+    # args.et='20250609'
+    # args.w=5
+    # args.t=20
     
     # args.task='pick_st_sell'
     # args.ATX_pos_file='ATX_csv/持仓查询_20250508105218.xlsx'

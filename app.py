@@ -48,7 +48,7 @@ text1.place(x=w*0.2,y=h*0.02,width=150,height=25)
 text1.insert(tk.END, '请输入待评估日期')
 
 # 打开历史拥挤度记录文件
-def open_csv():
+def open_csv1():
     global wpg_hist
     file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
     if file_path:
@@ -59,8 +59,22 @@ def open_csv():
             print(f"读取文件时出错：{e}")
             button2.config(text="读取文件时出错")
             
-button2 = tk.Button(root, text="打开历史拥挤度记录文件", command=open_csv)
-button2.place(x=w*0.45,y=h*0.02,width=150,height=25)
+button2 = tk.Button(root, text="打开成交量拥挤度文件", command=open_csv1)
+button2.place(x=w*0.35,y=h*0.02,width=150,height=25)
+
+def open_csv2():
+    global wpg_hlg_hist
+    file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+    if file_path:
+        try:
+            wpg_hlg_hist = pd.read_csv(file_path)
+            button3.config(text="读取文件成功")
+        except Exception as e:
+            print(f"读取文件时出错：{e}")
+            button3.config(text="读取文件时出错")
+
+button3 = tk.Button(root, text="打开微盘-红利拥挤度文件", command=open_csv2)
+button3.place(x=w*0.55,y=h*0.02,width=150,height=25)
 
 # 计算
 def cacl1():
@@ -181,7 +195,12 @@ def cacl1():
     hlg_return30=hlg['close'].iloc[-1]/hlg['close'].iloc[0]-1
     wpg_hlg_dif=round(wpg_return30-hlg_return30,3)
     
+    differences = np.abs(wpg_hlg_hist['crowdedness'] - wpg_hlg_dif)
+    min_index = differences.idxmin()
+    percent = round(wpg_hist.loc[min_index, 'crowdedness_percent'],2)
+    
     label8.config(text=f"微盘-红利涨幅(30天):{wpg_hlg_dif}")
+    label91.config(text=f"微盘-红利涨幅历史百分位:{percent}")
     
     
 button1 = tk.Button(root, text="点击开始计算", command=cacl1)
@@ -226,6 +245,11 @@ label7.place(x=w*0.25-100,y=h*0.52,width=200,height=25)
 # 拥挤度历史百分位
 label8 = tk.Label(root, text="微盘-红利涨幅(30天)", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
 label8.place(x=w*0.00,y=h*0.58,width=250)
+
+###############################第九行
+# 微盘-红利拥挤度历史百分位
+label91 = tk.Label(root, text="微盘-红利涨幅历史百分位", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
+label91.place(x=w*0.00,y=h*0.62,width=250)
 
 # 运行主循环
 
