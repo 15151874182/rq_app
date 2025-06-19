@@ -989,6 +989,40 @@ def main(args):
         
         
         
+    ####wpg_maxdrop_study 微盘股最大回撤研究
+    if args.task=='wpg_maxdrop_study':   
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None) 
+        wpg.index = wpg.index.get_level_values(1)
+        
+        def calculate_max_drawdown(window_series):
+            """计算单个窗口内的最大回撤"""
+            arr = window_series.values  # 转换为numpy数组加速计算
+            # 从后往前计算每个位置的最小值（包括当前位置）
+            min_from_i = np.minimum.accumulate(arr[::-1])[::-1]
+            # 计算每个位置的回撤：(后续最小值 - 当前值) / 当前值
+            drawdowns = (min_from_i - arr) / arr
+            return drawdowns.min()  # 取最小的回撤（最大跌幅）
+        def calculate_max_gain(window_series):
+            """计算单个窗口内的最大涨幅"""
+            arr = window_series.values  # 转换为numpy数组加速计算
+            # 从后往前计算每个位置的最大值（包括当前位置）
+            max_from_i = np.maximum.accumulate(arr[::-1])[::-1]
+            # 计算每个位置的涨幅：(后续最大值 - 当前值) / 当前值
+            gains = (max_from_i - arr) / arr
+            return gains.max()  # 取最大的涨幅（最大收益率）
+        # 计算每个90天窗口的最大回撤
+        wpg['max_drawdown'] = wpg['close'].rolling(window=60, min_periods=60).apply(calculate_max_drawdown)
+        wpg['max_drawdown'].hist()
+        wpg['max_gain'] = wpg['close'].rolling(window=60, min_periods=60).apply(calculate_max_gain)
+        wpg['max_gain'].hist()
+        
+        xx=a
+        
     ####wpg_hlg_return_study 微盘股和红利股每月收益研究
     if args.task=='wpg_hlg_return_study':   
         wpg=rqdatac.get_price(order_book_ids='866006.RI', 
@@ -1019,7 +1053,36 @@ def main(args):
         monthly_returns=df1
         monthly_returns.index.name='月度收益'
         res_wpg=monthly_returns.describe()
-
+        
+        xx=monthly_returns.iloc[:,:12]
+        xx = np.where(xx > 0, 1, -1) #正收益为1，负收益-1
+        xx = xx.flatten().tolist()
+        xx=xx[:-6] ##去掉最后位nan的6个月
+        
+        def count_consecutive(xx): ##统计连续1 和-1 的长度
+            if not xx:  # 处理空列表
+                return {'-1': [], '1': []}
+            
+            result = {'-1': [], '1': []}
+            current_val = xx[0]  # 初始当前值为第一个元素
+            current_length = 1   # 初始长度为1
+            
+            for num in xx[1:]:   # 从第二个元素开始遍历
+                if num == current_val:
+                    current_length += 1  # 与当前值相同，长度+1
+                else:
+                    # 遇到不同值，保存当前长度到对应键的列表
+                    result[str(current_val)].append(current_length)
+                    current_val = num    # 更新当前值为新值
+                    current_length = 1   # 重置长度为1
+            
+            # 遍历结束后，保存最后一个连续段的长度
+            result[str(current_val)].append(current_length)
+            return result
+        
+        dic=count_consecutive(xx)
+        
+        
         hlg=rqdatac.get_price(order_book_ids='000922.XSHG', 
                   start_date=args.st, 
                   end_date=args.et, 
@@ -1045,9 +1108,9 @@ def main(args):
         df1 = df1.pivot(index='Year', columns='Month', values='Return')                
         df1['年度累计'] = (df1.iloc[:, :12]+1).prod(axis=1)-1
         # monthly_returns = df1.applymap(lambda x: "{:.2%}".format(x))
-        monthly_returns=df1
-        monthly_returns.index.name='月度收益'
-        res_hlg=monthly_returns.describe()        
+        monthly_returns2=df1
+        monthly_returns2.index.name='月度收益'
+        res_hlg=monthly_returns2.describe()        
 
         xx=1
         
@@ -1375,6 +1438,34 @@ def main(args):
                                         maxmin=True)
         xx=a
         
+    ####wpg_compare wind,qmt,rq微盘股对比
+    if args.task=='wpg_compare':   
+        rq_wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date='20200101', 
+                  end_date='20250613', 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)     
+        rq_wpg.index = rq_wpg.index.get_level_values(1) 
+        rq_wpg=rq_wpg['20220101':'20230101']
+        # rq_wpg=rq_wpg['20220101':'20250613']
+        rq_wpg['return']=rq_wpg['close']/rq_wpg['prev_close']-1
+        # from xtquant import xtdata
+        # # xtdata.get_stock_list_in_sector()
+        # id='102722.BKZS'
+        # # xtdata.download_history_data('102722.BKZS', period='1d', start_time='', end_time='')
+        # qmt_wpg = xtdata.get_market_data_ex([],[id],period='1d',
+        #                                  start_time = '20200101',count=-1,
+        #                                  dividend_type='front_ratio')
+        wind_wpg=pd.read_csv('wind_csv/8841431.WI.csv',index_col='日期',parse_dates=True)
+        wind_wpg=wind_wpg['20220101':'20230101']
+        # wind_wpg=wind_wpg['20220101':'20250613']
+        
+        print('米筐')
+        Metrics.print_metrics(rq_wpg['return'],rq_wpg.index,0.03) 
+        print('wind')
+        Metrics.print_metrics(wind_wpg['涨跌幅'],wind_wpg.index,0.03) 
+        x=1
     ####crowdedness 微盘股拥挤度
     if args.task=='crowdedness':   
         
@@ -1584,7 +1675,9 @@ def main(args):
         
         
         # df=pd.read_csv('D:/project/quant/rq_app_exp/data/wpg_crowdedness.csv',index_col=0,parse_dates=True)
-        df=rqdatac.get_price(order_book_ids='866006.RI', 
+        df=rqdatac.get_price(
+                   # order_book_ids='932315.INDX', 
+                    order_book_ids='866006.RI', 
                   start_date=args.st, 
                   end_date=args.et, 
                   frequency='1d', 
@@ -1899,6 +1992,95 @@ def main(args):
                                               end_time=df.index[-1],
                                               days = None,
                                               maxmin=False)
+        ####macd+crowdness综合判断
+        if args.method=='MACD_2+crowdness':
+            df['DIF'], df['DEA'], df['MACD'] = talib.MACD(df['close'], 
+                                                        fastperiod=12, 
+                                                        slowperiod=26, 
+                                                        signalperiod=9)
+            def func1(window):
+                # 判断单调性
+                threshold=0.04
+                buy = (window[1] > window[0]) and (window[2] > window[1]) and (abs(window[1]/window[0]-1)>threshold) and (abs(window[2]/window[1]-1)>threshold)
+                sell = (window[0] > window[1]) and (window[1] > window[2]) and (abs(window[1]/window[0]-1)>threshold) and (abs(window[2]/window[1]-1)>threshold)
+                return 1 if buy else (-1 if sell else 0)
+            
+            df['MACD_signal'] = df['MACD'].rolling(window=3, min_periods=1).apply(func1)
+            df['MACD_flag'] = False ##True代表该天空仓
+            # 标记区间的开始和结束
+            flag = False  
+            for i in range(len(df)):
+                index=df.index[i]
+                if df.loc[index, 'MACD_signal']==-1 and not flag:
+                    flag = True
+                if df.loc[index, 'MACD_signal']==1 and flag:
+                    flag = False
+                if flag:
+                    df.loc[index, 'MACD_flag'] = True
+            df['MACD_flag']=df['MACD_flag'].shift(1)
+            df=df.dropna()
+            
+            r1=rqdatac.get_price(order_book_ids='000001.XSHG', 
+                      start_date=df.index[0], 
+                      end_date=df.index[-1], 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            r2=rqdatac.get_price(order_book_ids='399106.XSHE', 
+                      start_date=df.index[0], 
+                      end_date=df.index[-1], 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                      start_date=df.index[0], 
+                      end_date=df.index[-1], 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            r1.index = r1.index.get_level_values(1)
+            r2.index = r2.index.get_level_values(1)
+            wpg.index = wpg.index.get_level_values(1)
+            
+            df['crowdedness']= wpg['total_turnover']/(r1['total_turnover']+r2['total_turnover'])
+            df['crowdedness_flag']=df['crowdedness']>0.02
+            df['crowdedness_flag']=df['crowdedness_flag'].shift(1)
+            
+            df['flag']=df['MACD_flag'] & df['crowdedness_flag']
+            def func2(row):
+                if row['flag']:
+                # if row['MACD_flag']:
+                # if row['MACD_flag'] and row['crowdedness_flag']:
+                    return 0
+                elif row.name.month in [1,3,4,12]:
+                    return 0
+                else:
+                    return row['return']
+            df['MACD_return']=df.apply(func2, axis=1)
+            
+            
+            
+            
+            df=df['2017-06-01':]
+            print(df.index[0],df.index[-1])
+            def check_inconsistency(window):
+                return window[0] != window[1]
+            res = df['flag'].rolling(window=2).apply(check_inconsistency, raw=True)
+            inconsistency_count = res.sum()
+            print(f'交易次数：{inconsistency_count}')
+            
+            Metrics.print_metrics(df['return'],df.index,0.03)  
+            df['net']=list(Convert.returns_to_net(df['return'])) 
+            print('\n')
+            Metrics.print_metrics(df['MACD_return'],df.index,0.03)   
+            df['MACD_net']=list(Convert.returns_to_net(df['MACD_return'])) 
+            
+            Plot.plot_res(df,'',cols = ["net",
+                                        "MACD_net",
+                                        ],start_time = df.index[0],
+                                              end_time=df.index[-1],
+                                              days = None,
+                                              maxmin=False)
         
         ####macd顶分型
         if args.method=='MACD_3':
@@ -2187,15 +2369,21 @@ if __name__ == '__main__':
     # args.file=r'data/米筐微盘股macd周频.xlsx'
     
     # args.task='wpg_drop_study'
+    # args.st='20200101'
+    # args.et='20250616'
+    
+    # args.task='wpg_hlg'
+    
+    
+    # args.task='wpg_compare'
+    
+    # args.task='wpg_maxdrop_study'
     # args.st='20170101'
-    # args.et='20250321'
-    
-    args.task='wpg_hlg'
-    
+    # args.et='20250611'
     
     # args.task='wpg_hlg_return_study'
     # args.st='20170101'
-    # args.et='20250321'
+    # args.et='20250611'
     
     # args.task='make_backtest_file2'
     # args.st='20200101'
@@ -2214,12 +2402,12 @@ if __name__ == '__main__':
     # args.et='20250319'
     # args.file=r'data/米筐微盘股红利股择时等权日频_1412月空仓.xlsx'
     
-    # args.task='buy_sell'
-    # args.method='MACD_2'
-    # args.id1='000001.XSHG'
-    # args.id2='399106.XSHE'
-    # args.st='20200101'
-    # args.et='20250321'
+    args.task='buy_sell'
+    args.method='MACD_2+crowdness'
+    args.id1='000001.XSHG'
+    args.id2='399106.XSHE'
+    args.st='20200101'
+    args.et='20250617'
     
     # args.task='stratgy1'
     
@@ -2292,7 +2480,7 @@ if __name__ == '__main__':
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
     # args.st='20250101'
-    # args.et='20250611'
+    # args.et='20250617'
     
     # args.task='crowdedness3'
     # args.st='20230101'
