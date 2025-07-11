@@ -13,7 +13,7 @@ import logging
 import warnings
 warnings.filterwarnings('ignore')
 
-from config.config import ConfigParser,stock_info_path,stock_info
+# from config.config import ConfigParser,stock_info_path,stock_info
 
 import riskfolio as rp
 import yfinance as yf
@@ -76,12 +76,12 @@ class Riskfolio:
             rf = 0 # Risk free rate
             l = 0 # Risk aversion factor, only useful when obj is 'Utility'     
             
-            constraints=pd.DataFrame([[False,'All Assets','','','<=',0.05,'','','',''],
-                             [False,'All Assets','','','>=',0.01,'','','','']],
-                            columns=['Disabled','Type','Set','Position','Sign','Weight','Type Relative','Relative Set','Relative','Factor'])
-            A, B = rp.assets_constraints(constraints, asset_classes)
-            port.ainequality = A
-            port.binequality = B
+            # constraints=pd.DataFrame([[False,'All Assets','','','<=',0.05,'','','',''],
+            #                  [False,'All Assets','','','>=',0.01,'','','','']],
+            #                 columns=['Disabled','Type','Set','Position','Sign','Weight','Type Relative','Relative Set','Relative','Factor'])
+            # A, B = rp.assets_constraints(constraints, asset_classes)
+            # port.ainequality = A
+            # port.binequality = B
             w = port.optimization(model=model, rm=rm, kelly='approx',obj=obj, rf=rf, l=l, hist=hist)
             
             if plot:

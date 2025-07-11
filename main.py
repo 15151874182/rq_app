@@ -35,7 +35,7 @@ from tools.general_func import General
 # from tools.option_func import OPTION
 from tools.plot_func import Plot
 # from tools.analysis_func import Analysis
-# from tools.riskfolio_func import Riskfolio
+from tools.riskfolio_func import Riskfolio
 
 np.random.seed(0)
 # 添加项目路径=============================================================================
@@ -903,6 +903,52 @@ def main(args):
         
         df.to_csv(args.ATX_file,index=False)
         
+    if args.task=='ATX_to_ATX_adjust2':    
+        ####ATX_to_ATX_adjust2 根据ATX的实时监控.xlsx,生成csv，用于ATX 将正盈利的票清仓
+        print('ATX_to_ATX_adjust2...')
+
+        df=pd.read_excel(args.ATX_pos_file,dtype=str)
+        
+        df=df[df['持仓盈亏'].apply(lambda x: float(x))>0] ##正盈利的清仓
+        
+        df['证券市场']=df['交易市场'].apply(lambda x:'SZ' if x=='深交所' else 'SH')
+        df['证券代码']=df['证券代码']+'.'+df['证券市场']
+        df['当前拥股']=df['持仓数量'].apply(int)
+        df['目标拥股']=df['持仓数量'].apply(lambda x: int(float(x) * args.ratio))
+        df['调整股数']=df['目标拥股']-df['当前拥股']
+        df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
+        df=df.sort_values('调整股数',ascending=True)
+        df=df[df['调整股数']!=0]
+        
+        df['算法类型']='TWAP'
+        df['账户名称']=args.account
+        df['算法实例']='kf_twap_plus'
+        df['证券代码']=df['证券代码']
+        df['交易方向']=df['调整股数'].apply(lambda x:'买入' if x>0 else '卖出')
+        df['任务数量']=df['调整股数'].apply(abs)
+        df['开始时间']=args.st
+        df['结束时间']=args.et
+        df['涨跌停是否继续执行']='涨停不卖跌停不买'
+        df['过期后是否继续执行']='否'
+        df['其他参数']=np.nan
+        df['交易市场']=np.nan
+        
+        columns=['算法类型',
+                '账户名称',
+                '算法实例',
+                '证券代码',
+                '任务数量',
+                '交易方向',
+                '开始时间',
+                '结束时间',
+                '涨跌停是否继续执行',
+                '过期后是否继续执行',
+                '其他参数',
+                '交易市场']
+        df=df[columns]
+        
+        df.to_csv(args.ATX_file,index=False)
+        
     if args.task=='ATX_to_PMS_track':    
         ####ATX_to_PMS_track 根据实际ATX 成交查询.xlsx 成交价格，生成PMS单 追踪
         print('ATX_to_PMS_track...')
@@ -1115,6 +1161,57 @@ def main(args):
         xx=1
         
         
+    ####factor_study 因子研究
+    if args.task=='factor_study':   
+        explicit=rqdatac.get_factor_return(args.st, args.et, 
+                          factors= None, universe='whole_market',
+                          method='implicit',industry_mapping='citics_2019', model = 'v2')
+        
+        for factor in explicit.columns:
+            res=explicit[[factor]].cumsum()
+            res[factor].plot(title=factor)
+            plt.show()
+        
+        xx=1
+    
+    ####zzqz_study 中证全指研究
+    if args.task=='zzqz_study':   
+        df=rqdatac.index_weights(order_book_id='000985.XSHG', date=args.st)
+        df=df.reset_index()
+        df.columns=['id','weight']
+        df2=rqdatac.get_price(order_book_ids=list(df['id']), 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields='close', adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)      
+        df2=df2.reset_index()
+        df2=df2.set_index('date')
+        money=df2['close'].sum()*100
+        res=df2.groupby(level=0)['close'].sum()*100
+        res=res.to_frame()
+        res['return']=res['close']/res['close'].shift(1)-1
+        res=res.fillna(0)
+        res['net']=list(Convert.returns_to_net(res['return'])) 
+        
+        print('自己编制等股全A')
+        Metrics.print_metrics(res['return'],res.index,0.03) 
+        
+        zzqz=rqdatac.get_price(order_book_ids='000985.XSHG', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields='close', adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)           
+        zzqz.index = zzqz.index.get_level_values(1)
+        res['zzqz_net']=zzqz['close']/zzqz['close'].iloc[0]
+        
+        res['net2']=res['close']/res['close'].iloc[0]
+        
+        Plot.plot_res(res,'',cols = ['net','zzqz_net'],start_time = res.index[0],
+                                        end_time=res.index[-1],
+                                        days = None,
+                                        maxmin=False)
         
     ####wpg_drop_study 微盘股大跌研究
     if args.task=='wpg_drop_study':   
@@ -1323,6 +1420,128 @@ def main(args):
         plt.xticks(rotation=90)
         
         x=a
+        
+  ####crowdedness_study4 换手率，小-大市值，门限测试
+    if args.task=='crowdedness_study4':   
+        
+        dpg=rqdatac.get_price(order_book_ids='000510.XSHG', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        
+        dpg.index = dpg.index.get_level_values(1)
+        wpg.index = wpg.index.get_level_values(1)
+        
+        res=pd.concat([wpg[['total_turnover','close']],dpg[['total_turnover','close']]],axis=1)
+        res.columns=['wpg_turnover','wpg_close','dpg_turnover','dpg_close']
+        res['turnover_ratio']=res['wpg_turnover']/res['dpg_turnover']
+        
+        from scipy.stats import percentileofscore
+        def func1(window):
+            return percentileofscore(window, window[-1])
+        
+        res['turnover_ratio_pct'] = res['turnover_ratio'].rolling(window=252*3, min_periods=252*3).apply(func1)
+        
+        res['wpg_y']=res['wpg_close'].shift(-1*args.t)/res['wpg_close']-1
+        res['dpg_y']=res['dpg_close'].shift(-1*args.t)/res['dpg_close']-1
+        res['y']=res['wpg_y']-res['dpg_y']
+        res=res.dropna()
+        
+        res=res.sort_values(['turnover_ratio_pct'],ascending=True)
+        res['bucket'] = pd.cut(res['turnover_ratio_pct'], 
+                              bins=np.linspace(0, 100, 101),  # 创建100个等宽区间
+                              labels=range(100),  # 桶标签0-99
+                              include_lowest=True)  # 包含最小值
+         
+        # 按桶分组并计算y的均值
+        bucket_means = res.groupby('bucket')['y'].mean().reset_index()
+         
+        # 绘制柱状图
+        plt.figure(figsize=(20, 8))
+         
+        # 绘制柱状图
+        bars = plt.bar(bucket_means['bucket'], bucket_means['y'], 
+                      width=1,  # 每个桶宽度为1
+                      edgecolor='black', 
+                      linewidth=0.5)
+        dense_ticks = np.arange(0, 101, 1)  # 70到100，每5个单位
+        plt.xticks(dense_ticks, dense_ticks)
+        plt.xticks(rotation=90)
+        
+  ####crowdedness_study5 估值，小-大市值，门限测试
+    if args.task=='crowdedness_study5':   
+
+        dpg_pe=rqdatac.index_indicator(['399300.XSHE'],
+                                   start_date=args.st,end_date=args.et)
+        wpg_pe=rqdatac.index_indicator(['399303.XSHE'],
+                                   start_date=args.st,end_date=args.et)
+        
+        dpg_pe.index = dpg_pe.index.get_level_values(1)
+        wpg_pe.index = wpg_pe.index.get_level_values(1)
+        
+        dpg=rqdatac.get_price(order_book_ids='000510.XSHG', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        
+        dpg.index = dpg.index.get_level_values(1)
+        wpg.index = wpg.index.get_level_values(1)        
+        
+        
+        res=pd.concat([wpg[['close']],dpg[['close']],wpg_pe[['pe_ttm']],dpg_pe[['pe_ttm']]],axis=1)
+        res.columns=['wpg_close','dpg_close','wpg_pe','dpg_pe']
+        res['pe_ratio']=res['wpg_pe']/res['dpg_pe']
+        
+        from scipy.stats import percentileofscore
+        def func1(window):
+            return percentileofscore(window, window[-1])
+        
+        res['pe_ratio_pct'] = res['pe_ratio'].rolling(window=252*3, min_periods=252*3).apply(func1)
+        
+        res['wpg_y']=res['wpg_close'].shift(-1*args.t)/res['wpg_close']-1
+        res['dpg_y']=res['dpg_close'].shift(-1*args.t)/res['dpg_close']-1
+        res['y']=res['wpg_y']-res['dpg_y']
+        res=res.dropna()
+        
+        res=res.sort_values(['pe_ratio_pct'],ascending=True)
+        res['bucket'] = pd.cut(res['pe_ratio_pct'], 
+                              bins=np.linspace(0, 100, 101),  # 创建100个等宽区间
+                              labels=range(100),  # 桶标签0-99
+                              include_lowest=True)  # 包含最小值
+         
+        # 按桶分组并计算y的均值
+        bucket_means = res.groupby('bucket')['y'].mean().reset_index()
+         
+        # 绘制柱状图
+        plt.figure(figsize=(20, 8))
+         
+        # 绘制柱状图
+        bars = plt.bar(bucket_means['bucket'], bucket_means['y'], 
+                      width=1,  # 每个桶宽度为1
+                      edgecolor='black', 
+                      linewidth=0.5)
+        dense_ticks = np.arange(0, 101, 1)  # 70到100，每5个单位
+        plt.xticks(dense_ticks, dense_ticks)
+        plt.xticks(rotation=90)
+        
+        x=a
+        
     ####pick_st_sell 找出st的票然后清掉
     if args.task=='pick_st_sell':   
         df=pd.read_excel(args.ATX_pos_file,dtype=str)
@@ -1466,6 +1685,179 @@ def main(args):
         print('wind')
         Metrics.print_metrics(wind_wpg['涨跌幅'],wind_wpg.index,0.03) 
         x=1
+        
+        
+    ####opt_wpg_hlg_bond 组合优化微盘股+红利+债券
+    if args.task=='opt_wpg_hlg_bond':   
+        st='20200101'
+        et='20250626'
+
+        wpg=rqdatac.get_price(order_book_ids='866006.RI',  ##微盘股
+                  start_date=st, 
+                  end_date=et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)             
+        hlg=rqdatac.get_price(order_book_ids='000922.XSHG',  ##中证红利
+                  start_date=st, 
+                  end_date=et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)     
+        bond=rqdatac.get_price(order_book_ids='932311.INDX',  ##中证7-30年国债及政策性金融债指数
+                  start_date=st, 
+                  end_date=et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)     
+        wpg.index = wpg.index.get_level_values(1) 
+        wpg['return']=wpg['close']/wpg['prev_close']-1
+        hlg.index = hlg.index.get_level_values(1) 
+        hlg['return']=hlg['close']/hlg['prev_close']-1
+        bond.index = bond.index.get_level_values(1) 
+        bond['return']=bond['close']/bond['prev_close']-1
+        
+        riskfolio_returns=pd.concat([wpg[['return']],hlg[['return']],bond[['return']]],axis=1)
+        riskfolio_returns.columns=['wpg','hlg','bond']
+        N=252*5
+        riskfolio_returns=riskfolio_returns.iloc[-(N):]    
+        
+        asset_classes=pd.DataFrame(riskfolio_returns.columns,columns=['Assets'])
+        asset_classes['Class 1']='stock'
+        
+        import riskfolio as rp
+        def classic_mean_risk_optimization(returns,asset_classes,task,plot=True):
+            '''
+            Mean-Variance Portfolios和Mean-Risk Portfolios都是现代投资组合理论中的概念，用于帮助投资者在风险和回报之间找到最佳平衡。尽管它们在目标上相似，即在不同的风险水平上最大化回报，但它们在考虑风险的方式上存在差异。
+    
+            Mean-Variance Portfolios
+            Mean-Variance Portfolios基于Harry Markowitz于1952年提出的现代投资组合理论，也称为均值-方差优化。这种方法的核心在于投资组合的选择不仅取决于其预期回报（均值）而且还取决于其风险（方差或标准差）。Markowitz的理论认为，通过分散投资组合，可以在不同的风险水平上最大化预期回报。在这种方法中，风险是通过投资组合回报的方差或标准差来衡量的，这反映了投资回报的波动性。
+            
+            Mean-Risk Portfolios
+            Mean-Risk Portfolios也旨在平衡回报和风险，但它们在定义风险时可能采用不同于方差的其他风险度量。这些风险度量可以包括但不限于下行风险、Value at Risk (VaR)、Conditional Value at Risk (CVaR)、或其他风险度量标准。这种方法认识到不同的投资者可能对风险有不同的容忍度，特别是在对风险的不同方面更为敏感时（例如，更关心损失的可能性而不是收益的波动性）。
+            '''
+            if task=='estimating_mean_variance_portfolios':
+                '''
+                2.1 Calculating the portfolio that maximizes Sharpe ratio.
+                '''
+                # Building the portfolio object
+                
+                port = rp.Portfolio(returns=returns)  
+                # Calculating optimal portfolio      
+                # Select method and estimate input parameters:      
+                method_mu='hist' # Method to estimate expected returns based on historical data.
+                method_cov='hist' # Method to estimate covariance matrix based on historical data.        
+                port.assets_stats(method_mu=method_mu, method_cov=method_cov, d=0.94)   
+                # Estimate optimal portfolio:   
+                model='Classic' # Could be Classic (historical), BL (Black Litterman) or FM (Factor Model)
+                rm = 'MV' # Risk measure used, this time will be variance
+                obj = 'MinRisk' # Objective function, could be MinRisk, MaxRet, Utility or Sharpe
+                hist = True # Use historical scenarios for risk measures that depend on scenarios
+                rf = 0 # Risk free rate
+                l = 0 # Risk aversion factor, only useful when obj is 'Utility'     
+                
+                # constraints=pd.DataFrame([[False,'All Assets','','','<=',0.05,'','','',''],
+                #                  [False,'All Assets','','','>=',0.01,'','','','']],
+                #                 columns=['Disabled','Type','Set','Position','Sign','Weight','Type Relative','Relative Set','Relative','Factor'])
+                # A, B = rp.assets_constraints(constraints, asset_classes)
+                # port.ainequality = A
+                # port.binequality = B
+                w = port.optimization(model=model, rm=rm, kelly='approx',obj=obj, rf=rf, l=l, hist=hist)
+                
+                if plot:
+                    '''
+                    2.2 Plotting portfolio composition
+                    '''
+                    # Plotting the composition of the portfolio
+                    ax = rp.plot_pie(w=w, title='Sharpe Mean Variance', others=0.05, nrow=25, cmap = "tab20",
+                                     height=6, width=10, ax=None)
+                    plt.show()            
+                    '''
+                    2.3 Calculate efficient frontier
+                    '''        
+                    points = 50 # Number of points of the frontier     
+                    frontier = port.efficient_frontier(model=model, rm=rm, points=points, rf=rf, hist=hist)  
+                    # Plotting the efficient frontier       
+                    label = 'Max Risk Adjusted Return Portfolio' # Title of point
+                    mu = port.mu # Expected returns
+                    cov = port.cov # Covariance matrix
+                    returns = port.returns # Returns of the assets
+                    ax = rp.plot_frontier(w_frontier=frontier, mu=mu, cov=cov, returns=returns, rm=rm,
+                                          rf=rf, alpha=0.05, cmap='viridis', w=w, label=label,
+                                          marker='*', s=16, c='r', height=6, width=10, ax=None)                
+                    plt.show()            
+                    # Plotting efficient frontier composition
+                    ax = rp.plot_frontier_area(w_frontier=frontier, cmap="tab20", height=6, width=10, ax=None)
+                    plt.show()   
+                return w  ##返回配置资产权重
+            
+        w=classic_mean_risk_optimization(riskfolio_returns, ##算出top票权重
+                                                   asset_classes,
+                                                   task='estimating_mean_variance_portfolios',
+                                                   plot=True)      
+        
+        
+        xx=1
+    ####wpg_IM_hedge 微盘股和IM对冲
+    if args.task=='wpg_IM_hedge':   
+        wpg=rqdatac.get_price(order_book_ids='866006.RI', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None) 
+        zz1000=rqdatac.get_price(order_book_ids='000852.XSHG', 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)   
+        wpg.index = wpg.index.get_level_values(1)        
+        zz1000.index = zz1000.index.get_level_values(1)    
+        
+        df=pd.concat([wpg['close'],zz1000['close']],axis=1)
+        df.columns=['wpg','zz1000']
+        df['wpg_return']=df['wpg']/df['wpg'].shift(1)-1
+        df['zz1000_return']=df['zz1000']/df['zz1000'].shift(1)-1
+        df['wpg_net']=df['wpg']/df['wpg'].iloc[0]
+        df['zz1000_net']=df['zz1000']/df['zz1000'].iloc[0]
+        df['net_return']=(df['wpg_return']-df['zz1000_return'])*0.6
+        df['hedge_net']=list(Convert.returns_to_net(df['net_return']))
+        df=df.dropna()
+        
+        Metrics.print_metrics(df['net_return'],df.index,0.03) 
+        Plot.plot_res(df,'',cols = ['wpg_net','zz1000_net','hedge_net'],start_time = df.index[0],
+                                        end_time=df.index[-1],
+                                        days = None,
+                                        maxmin=False)
+        xx=1
+        
+    ####download 下载常用指数数据
+    if args.task=='download':   
+        #中证2000 '932000.INDX'
+        #中证红利 '000922.XSHG'
+        #米筐微盘股 '866006.RI'
+        # A股指数 '000002.XSHG'
+        # 中证港股通综合指数 '930930.INDX'
+        # 国证机器人产业指数 '980022.INDX'
+        # 中证A500 '000510.XSHG'
+        # H50066.XSHG,"09:31-11:30,13:01-15:00",0.0,沪港AH溢价
+        
+        # args.id1='000001.XSHG' #上证
+        # args.id2='399106.XSHE' #深证
+        ids=['932000.INDX','000922.XSHG','866006.RI',
+             '980022.INDX','000510.XSHG','000001.XSHG','399106.XSHE']
+        
+        for id in tqdm(ids):
+            df=rqdatac.get_price(order_book_ids=id, 
+                      start_date=args.st, 
+                      end_date=args.et, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None) 
+            df.index = df.index.get_level_values(1)    
+            df.to_csv(f'data/{id}.csv')
+        xx=1
     ####crowdedness 微盘股拥挤度
     if args.task=='crowdedness':   
         
@@ -2006,19 +2398,6 @@ def main(args):
                 return 1 if buy else (-1 if sell else 0)
             
             df['MACD_signal'] = df['MACD'].rolling(window=3, min_periods=1).apply(func1)
-            df['MACD_flag'] = False ##True代表该天空仓
-            # 标记区间的开始和结束
-            flag = False  
-            for i in range(len(df)):
-                index=df.index[i]
-                if df.loc[index, 'MACD_signal']==-1 and not flag:
-                    flag = True
-                if df.loc[index, 'MACD_signal']==1 and flag:
-                    flag = False
-                if flag:
-                    df.loc[index, 'MACD_flag'] = True
-            df['MACD_flag']=df['MACD_flag'].shift(1)
-            df=df.dropna()
             
             r1=rqdatac.get_price(order_book_ids='000001.XSHG', 
                       start_date=df.index[0], 
@@ -2043,17 +2422,28 @@ def main(args):
             wpg.index = wpg.index.get_level_values(1)
             
             df['crowdedness']= wpg['total_turnover']/(r1['total_turnover']+r2['total_turnover'])
-            df['crowdedness_flag']=df['crowdedness']>0.02
-            df['crowdedness_flag']=df['crowdedness_flag'].shift(1)
+            df['crowdedness_signal']=df['crowdedness']>0.02
             
-            df['flag']=df['MACD_flag'] & df['crowdedness_flag']
+            df['flag'] = False ##True代表该天空仓
+            # 标记区间的开始和结束
+            flag = False  
+            for i in range(len(df)):
+                index=df.index[i]
+                if df.loc[index, 'MACD_signal']==-1 and df.loc[index, 'crowdedness_signal']==True and not flag:
+                    flag = True
+                # if df.loc[index, 'MACD_signal']==1 and flag:
+                if df.loc[index, 'MACD_signal']==1 and df.loc[index, 'crowdedness_signal']==False and flag:
+                    flag = False
+                if flag:
+                    df.loc[index, 'flag'] = True
+            df['flag']=df['flag'].shift(1)
+            df=df.dropna()
+            
             def func2(row):
                 if row['flag']:
-                # if row['MACD_flag']:
-                # if row['MACD_flag'] and row['crowdedness_flag']:
                     return 0
-                elif row.name.month in [1,3,4,12]:
-                    return 0
+                # elif row.name.month in [1,3,4,12]:
+                #     return 0
                 else:
                     return row['return']
             df['MACD_return']=df.apply(func2, axis=1)
@@ -2353,6 +2743,7 @@ if __name__ == '__main__':
     # 国证机器人产业指数 '980022.INDX'
     # 中证A500 '000510.XSHG'
     # H50066.XSHG,"09:31-11:30,13:01-15:00",0.0,沪港AH溢价
+    # 000985.XSHG,"09:31-11:30,13:01-15:00",0.0,中证全指
     
     # args.id1='000001.XSHG' #上证
     # args.id2='399106.XSHE' #深证
@@ -2367,6 +2758,14 @@ if __name__ == '__main__':
     # args.et='20250321'
     # args.f=5
     # args.file=r'data/米筐微盘股macd周频.xlsx'
+    
+    # args.task='factor_study'
+    # args.st='20100101'
+    # args.et='20250707'    
+    
+    # args.task='zzqz_study'
+    # args.st='20200101'
+    # args.et='20250707'
     
     # args.task='wpg_drop_study'
     # args.st='20200101'
@@ -2383,7 +2782,7 @@ if __name__ == '__main__':
     
     # args.task='wpg_hlg_return_study'
     # args.st='20170101'
-    # args.et='20250611'
+    # args.et='20250709'
     
     # args.task='make_backtest_file2'
     # args.st='20200101'
@@ -2402,12 +2801,12 @@ if __name__ == '__main__':
     # args.et='20250319'
     # args.file=r'data/米筐微盘股红利股择时等权日频_1412月空仓.xlsx'
     
-    args.task='buy_sell'
-    args.method='MACD_2+crowdness'
-    args.id1='000001.XSHG'
-    args.id2='399106.XSHE'
-    args.st='20200101'
-    args.et='20250617'
+    # args.task='buy_sell'
+    # args.method='MACD_2+crowdness'
+    # args.id1='000001.XSHG'
+    # args.id2='399106.XSHE'
+    # args.st='20200101'
+    # args.et='20250623'
     
     # args.task='stratgy1'
     
@@ -2435,16 +2834,16 @@ if __name__ == '__main__':
     
     # args.task='rq_wpg_make_pms_csv'
     # # args.et=rqdatac.get_latest_trading_date()
-    # args.et=pd.to_datetime('20250523')
+    # args.et=pd.to_datetime('20250710')
     # args.money=200e4
     
     # args.task='rq_wpg_adjust_ATX'
-    # args.pms_file='PMS_csv/共同target_2025-05-23.xlsx'
-    # args.start_time='20250526T093000000'
-    # args.end_time=  '20250526T103000000'  
+    # args.pms_file='ATX_csv/持仓查询none.xlsx'
+    # args.start_time='20250630T093000000'
+    # args.end_time=  '20250630T100000000'  
     
-    # args.ATX_pos_file='ATX_csv/持仓查询百里挑一信用_20250523153324.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-05-26_百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250707102438.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-07_百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/持仓查询绝对收益信用_20250523153502.xlsx'
@@ -2456,19 +2855,41 @@ if __name__ == '__main__':
     # args.ATX_file='ATX_csv/成交查询绝对收益_20250429095802.xls'
     
     # args.task='ATX_to_ATX_adjust'
-    # args.st='20250527T093000000'
-    # args.et='20250527T103000000'  
+    # args.st='20250707T143000000'
+    # args.et='20250707T150000000'  
     # args.ratio=0
     
-    # # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250526174947.xlsx'
-    # # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_百里挑一信用.csv'
-    # # args.account='百榕百里挑一稳健一号信用'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250707102438.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-07_百里挑一信用.csv'
+    # args.account='百榕百里挑一稳健一号信用'
+    
+    # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250526174918.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_绝对收益信用.csv'
+    # args.account='百榕全天候宏观对冲绝对收益信用'
+    
+    args.task='ATX_to_ATX_adjust2'
+    args.st='20250711T093000000'
+    args.et='20250711T100000000'  
+    args.ratio=0
+    
+    args.ATX_pos_file='ATX_csv/持仓查询_20250710155606.xlsx'
+    args.ATX_file='ATX_csv/ATX_stock_2025-07-11_百里挑一信用.csv'
+    args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250526174918.xlsx'
     # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
     
+    # args.task='opt_wpg_hlg_bond'
+    
+    # args.task='wpg_IM_hedge'
+    # args.st='20190101'
+    # args.et='20250701'
+    
+    # args.task='download'
+    # args.st='20100101'
+    # args.et='20250630'
     
     # args.task='crowdedness'
     # args.id1='000001.XSHG'
@@ -2479,8 +2900,8 @@ if __name__ == '__main__':
     # args.task='crowdedness2'
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
-    # args.st='20250101'
-    # args.et='20250617'
+    # args.st='20250401'
+    # args.et='20250701'
     
     # args.task='crowdedness3'
     # args.st='20230101'
@@ -2500,6 +2921,18 @@ if __name__ == '__main__':
     # args.et='20250609'
     # args.w=5
     # args.t=20
+    
+    # args.task='crowdedness_study4'
+    # args.st='20160101'
+    # args.et='20250708'
+    # # args.w=5
+    # args.t=90
+    
+    # args.task='crowdedness_study5'
+    # args.st='20160101'
+    # args.et='20250708'
+    # # args.w=5
+    # args.t=60
     
     # args.task='crowdedness_study3'
     # args.st='20200101'

@@ -19,9 +19,13 @@ from tools.general_func import General
 from tools.plot_func import Plot
 rqdatac.init()
 
+# #解决中文或者是负号无法显示的情况
+mpl.rcParams["font.sans-serif"] = ["SimHei"]
+mpl.rcParams['axes.unicode_minus'] = False
+
 # et=rqdatac.get_latest_trading_date()
-et='2025-03-26'
-st=rqdatac.get_previous_trading_date(et,n=4,market='cn')
+et='2025-07-09'
+st=rqdatac.get_previous_trading_date(et,n=100,market='cn')
 
 cols_risk_factor=[
     # 市场风险因子
@@ -89,6 +93,11 @@ explicit=rqdatac.get_factor_return(st, et,
 ##要用显式因子收益率（多空组合算出来的）+行业因子收益率（显式没有这个），拼起来
 factor_return=pd.concat([explicit[cols_risk_factor],implicit[cols_industry_factor]],axis=1)
 
+for factor in factor_return.columns:
+    res=factor_return[[factor]].cumsum().rolling(window=5).mean()
+    res[factor].plot(title=factor)
+    plt.show()
+
 ##对因子按天远近加权
 daily_weights=General.sum_normalize([i for i in range(1,len(factor_return)+1)])
 daily_weights = pd.Series(daily_weights, index=factor_return.index)
@@ -101,9 +110,7 @@ factor_return_weighted = factor_return.multiply(daily_weights, axis=0)
 
 # # 创建一个 3 行 2 列的画布
 # fig, axes = plt.subplots(3, 2, figsize=(30, 30))
-# #解决中文或者是负号无法显示的情况
-# mpl.rcParams["font.sans-serif"] = ["SimHei"]
-# mpl.rcParams['axes.unicode_minus'] = False
+
 # plt.rcParams['figure.dpi'] = 300
 # plt.tight_layout(
 #     pad=10.0,        # 主画布与子图之间的边距
