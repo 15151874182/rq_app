@@ -870,7 +870,7 @@ def main(args):
         df['当前拥股']=df['持仓数量'].apply(int)
         df['目标拥股']=df['持仓数量'].apply(lambda x: int(float(x) * args.ratio))
         df['调整股数']=df['目标拥股']-df['当前拥股']
-        df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
+        # df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
         df=df.sort_values('调整股数',ascending=True)
         df=df[df['调整股数']!=0]
         
@@ -916,7 +916,7 @@ def main(args):
         df['当前拥股']=df['持仓数量'].apply(int)
         df['目标拥股']=df['持仓数量'].apply(lambda x: int(float(x) * args.ratio))
         df['调整股数']=df['目标拥股']-df['当前拥股']
-        df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
+        # df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
         df=df.sort_values('调整股数',ascending=True)
         df=df[df['调整股数']!=0]
         
@@ -1161,6 +1161,33 @@ def main(args):
         xx=1
         
         
+    ####hlg_dividend 红利股息率监测
+    if args.task=='hlg_dividend':   
+        dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
+        result=[]
+        for date in tqdm(dates):    
+            riskfree=rqdatac.get_yield_curve(start_date=date, end_date=date)
+            
+            df=rqdatac.index_weights(order_book_id='000922.XSHG', date=date) ##中证红利
+            df=df.reset_index()
+            
+            dividend=rqdatac.get_factor(list(df['order_book_id']), 'dividend_yield_ttm', date,date)
+            dividend=dividend.reset_index()
+            
+            res=dividend['dividend_yield_ttm'].mean()
+            
+            df2=rqdatac.index_weights(order_book_id='399986.XSHE', date=date) ##中证银行
+            df2=df2.reset_index()
+            
+            dividend2=rqdatac.get_factor(list(df2['order_book_id']), 'dividend_yield_ttm', date,date)
+            dividend2=dividend2.reset_index()
+            
+            res2=dividend2['dividend_yield_ttm'].mean()
+            
+            result.append([res,res2])
+        result=pd.DataFrame(result,columns=['zzhl','zzyh'])
+        
+        xx=a
     ####factor_study 因子研究
     if args.task=='factor_study':   
         explicit=rqdatac.get_factor_return(args.st, args.et, 
@@ -2744,6 +2771,7 @@ if __name__ == '__main__':
     # 中证A500 '000510.XSHG'
     # H50066.XSHG,"09:31-11:30,13:01-15:00",0.0,沪港AH溢价
     # 000985.XSHG,"09:31-11:30,13:01-15:00",0.0,中证全指
+    # 399986.XSHE,"09:31-11:30,13:01-15:00",0.0,中证银行
     
     # args.id1='000001.XSHG' #上证
     # args.id2='399106.XSHE' #深证
@@ -2810,6 +2838,10 @@ if __name__ == '__main__':
     
     # args.task='stratgy1'
     
+    args.task='hlg_dividend'
+    args.st='20150101'
+    args.et='20250715'
+    
     # args.task='make_backtest_file'
     # args.st='20240101'
     # args.et='20241231'
@@ -2855,26 +2887,26 @@ if __name__ == '__main__':
     # args.ATX_file='ATX_csv/成交查询绝对收益_20250429095802.xls'
     
     # args.task='ATX_to_ATX_adjust'
-    # args.st='20250707T143000000'
-    # args.et='20250707T150000000'  
+    # args.st='20250714T093000000'
+    # args.et='20250714T100000000'  
     # args.ratio=0
     
-    # args.ATX_pos_file='ATX_csv/持仓查询_20250707102438.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-07-07_百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250714090242.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-14_百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250526174918.xlsx'
     # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
-    args.task='ATX_to_ATX_adjust2'
-    args.st='20250711T093000000'
-    args.et='20250711T100000000'  
-    args.ratio=0
+    # args.task='ATX_to_ATX_adjust2'   ##正盈利清仓
+    # args.st='20250711T093000000'
+    # args.et='20250711T100000000'  
+    # args.ratio=0
     
-    args.ATX_pos_file='ATX_csv/持仓查询_20250710155606.xlsx'
-    args.ATX_file='ATX_csv/ATX_stock_2025-07-11_百里挑一信用.csv'
-    args.account='百榕百里挑一稳健一号信用'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250710155606.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-11_百里挑一信用.csv'
+    # args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250526174918.xlsx'
     # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_绝对收益信用.csv'

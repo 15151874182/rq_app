@@ -25,7 +25,7 @@ mpl.rcParams['axes.unicode_minus'] = False
 
 # et=rqdatac.get_latest_trading_date()
 et='2025-07-09'
-st=rqdatac.get_previous_trading_date(et,n=100,market='cn')
+st=rqdatac.get_previous_trading_date(et,n=252*5,market='cn')
 
 cols_risk_factor=[
     # 市场风险因子

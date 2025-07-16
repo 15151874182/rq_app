@@ -202,6 +202,30 @@ def cacl1():
     label8.config(text=f"微盘-红利涨幅(30天):{wpg_hlg_dif}")
     label91.config(text=f"微盘-红利涨幅历史百分位:{percent}")
     
+##############################################################红利股息率监测   
+    riskfree=rqdatac.get_yield_curve(start_date=date, end_date=date)
+    riskfree=round(riskfree['10Y'],4).iloc[0]
+    
+    df=rqdatac.index_weights(order_book_id='000922.XSHG', date=date) ##中证红利
+    df=df.reset_index()
+    dividend=rqdatac.get_factor(list(df['order_book_id']), 'dividend_yield_ttm', date,date)
+    dividend=dividend.reset_index()
+    zzhl=round(dividend['dividend_yield_ttm'].mean(),4)
+    
+    df2=rqdatac.index_weights(order_book_id='399986.XSHE', date=date) ##中证银行
+    df2=df2.reset_index()
+    dividend2=rqdatac.get_factor(list(df2['order_book_id']), 'dividend_yield_ttm', date,date)
+    dividend2=dividend2.reset_index()
+    zzyh=round(dividend2['dividend_yield_ttm'].mean(),4)
+    
+    
+    label82.config(text=f"中证红利股息率:{zzhl}")
+    label92.config(text=f"中证银行股息率:{zzyh}")   
+    label101.config(text=f"10Y国债:{riskfree}")
+    label111.config(text=f"红利-2*10Y国债:{round(zzhl-2*riskfree,4)}")
+    label121.config(text=f"银行-2*10Y国债:{round(zzyh-2*riskfree,4)}")
+    
+    
     
 button1 = tk.Button(root, text="点击开始计算", command=cacl1)
 button1.place(x=w*0.7,y=h*0.02,width=150,height=25)
@@ -240,16 +264,32 @@ label6.place(x=w*0.00,y=h*0.30,width=250)
 # 微盘-红利轮动指标
 label7 = tk.Label(root, text="微盘-红利轮动指标", borderwidth=1, relief="raised", font=("Arial", 16, "bold"))
 label7.place(x=w*0.25-100,y=h*0.52,width=200,height=25)
+label72 = tk.Label(root, text="股息-2*10Y国债指标", borderwidth=1, relief="raised", font=("Arial", 16, "bold"))
+label72.place(x=w*0.75-100,y=h*0.52,width=200,height=25)
 
 ###############################第八行
 # 拥挤度历史百分位
 label8 = tk.Label(root, text="微盘-红利涨幅(30天)", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
 label8.place(x=w*0.00,y=h*0.58,width=250)
+label82 = tk.Label(root, text="中证红利股息率", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
+label82.place(x=w*0.54,y=h*0.58,width=250)
 
 ###############################第九行
 # 微盘-红利拥挤度历史百分位
 label91 = tk.Label(root, text="微盘-红利涨幅历史百分位", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
 label91.place(x=w*0.00,y=h*0.62,width=250)
+label92 = tk.Label(root, text="中证银行股息率", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
+label92.place(x=w*0.54,y=h*0.62,width=250)
+
+###############################第十行
+label101 = tk.Label(root, text="10Y国债", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
+label101.place(x=w*0.54,y=h*0.66,width=250)
+###############################第十一行
+label111 = tk.Label(root, text="红利-2*10Y国债", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
+label111.place(x=w*0.54,y=h*0.7,width=250)
+###############################第十二行
+label121 = tk.Label(root, text="银行-2*10Y国债", borderwidth=0, relief="raised", font=("Arial", 12, "bold"))
+label121.place(x=w*0.54,y=h*0.74,width=250)
 
 # 运行主循环
 
