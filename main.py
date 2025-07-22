@@ -2023,6 +2023,127 @@ def main(args):
                                         maxmin=False)
         xx=a
 
+    ####cb_iv 计算可转债的隐含波动率
+    if args.task=='cb_iv':   
+        
+        import QuantLib as ql
+
+        def calculate_implied_volatility(
+            option_type,  # 期权类型：'call' 或 'put'
+            S,            # 标的资产价格(正股价格)
+            K,            # 行权价
+            T,            # 剩余期限（年）
+            r,            # 无风险利率（年化）
+            market_price, # 期权市场价格
+            sigma_guess=1.0,  # 波动率初始猜测值（默认20%）
+            max_iter=100,     # 最大迭代次数
+            tol=1e-6          # 计算精度
+        ):
+            # 1. 设置定价引擎参数
+            calendar = ql.China()  # 中国市场日历（根据标的资产所在市场调整）
+            day_count = ql.Actual365Fixed()  # 日计数规则
+            
+            # 2. 构建期权对象
+            option_type = ql.Option.Call if option_type == 'call' else ql.Option.Put
+            payoff = ql.PlainVanillaPayoff(option_type, K)
+            exercise = ql.EuropeanExercise(ql.Date().todaysDate() + ql.Period(int(T*365), ql.Days))
+            option = ql.VanillaOption(payoff, exercise)
+            
+            # 3. 构建Black-Scholes模型参数
+            spot_handle = ql.QuoteHandle(ql.SimpleQuote(S))
+            r_ts = ql.YieldTermStructureHandle(ql.FlatForward(0, calendar, r, day_count))
+            div_ts = ql.YieldTermStructureHandle(ql.FlatForward(0, calendar, 0.0, day_count))  # 假设无股息
+            vol_ts = ql.BlackVolTermStructureHandle(ql.BlackConstantVol(0, calendar, sigma_guess, day_count))
+            
+            # 4. 设置定价引擎
+            bsm_process = ql.BlackScholesMertonProcess(spot_handle, div_ts, r_ts, vol_ts)
+            option.setPricingEngine(ql.AnalyticEuropeanEngine(bsm_process))
+            
+            # 5. 计算隐含波动率（通过迭代调整vol_ts）
+            iv = option.impliedVolatility(market_price, bsm_process, tol, max_iter)
+            return iv
+        
+        # id="118057.XSHG"
+        # id="123257.XSHE"
+        # id="111023.XSHG"
+        # id="123205.XSHE"
+        id="113695.XSHG"
+        cb_info=rqdatac.convertible.instruments(id)
+        cb_info2=rqdatac.convertible.get_conversion_price(id)
+        # cb_info2=rqdatac.convertible.get_call_info(id)
+
+        cb_df=rqdatac.get_price(id, start_date=args.date, end_date=args.date,
+                  frequency='1d', fields=None, adjust_type='pre',
+                  skip_suspended =False, market='cn', expect_df=True,time_slice=None)
+        stock_df=rqdatac.get_price(cb_info.stock_code, start_date=args.date, end_date=args.date,
+                  frequency='1d', fields=None, adjust_type='pre',
+                  skip_suspended =False, market='cn', expect_df=True,time_slice=None)
+        
+        option_type = 'call'    # 看涨期权
+        S= stock_df['close'].iloc[0]# 标的价格（正股价格）
+        K=cb_info2['conversion_price'].iloc[-1] #行权价(转股价)
+        
+        from datetime import datetime
+        st=datetime.strptime(args.date, '%Y%m%d')
+        et=cb_info.maturity_date
+        delta_days = abs((et - st).days)
+        T = delta_days / 365 # 剩余期限
+        
+        market_price = cb_df['close'].iloc[0] # 期权市场价格
+        r=rqdatac.get_yield_curve(start_date=args.date, end_date=args.date)
+        r=round(r['10Y'],4).iloc[0]
+        
+        
+        def calculate_pure_bond_value(face_value=100, coupon_rate=0.002, discount_rate=0.0168, years_to_maturity=5.9, frequency=1):
+            """
+            计算纯债价值（现金流贴现模型）
+            :param face_value: 债券面值（默认100元）
+            :param coupon_rate: 票面利率（年化，默认0.2%）
+            :param discount_rate: 折现率（年化，默认1.68%）
+            :param years_to_maturity: 剩余期限（年，默认5.9）
+            :param frequency: 付息频率（年付=1，半年付=2，默认1）
+            :return: 纯债价值（保留2位小数）
+            """
+            total_pv = 0.0  # 总现值
+            periods = int(years_to_maturity * frequency)  # 总付息期数
+            remaining_years = years_to_maturity  # 剩余期限（年）
+            
+            # 1. 计算每期票息现金流现值
+            coupon = face_value * coupon_rate / frequency  # 每期票息
+            for t in range(1, periods + 1):
+                # 第t期的折现因子 = 1 / (1 + r/frequency)^(t)
+                discount_factor = 1 / (1 + discount_rate / frequency) ** t
+                total_pv += coupon * discount_factor
+            
+            # 2. 计算本金偿还现值（最后一期）
+            principal_discount_factor = 1 / (1 + discount_rate / frequency) ** periods
+            total_pv += face_value * principal_discount_factor
+            
+            return round(total_pv, 2)
+
+        # 代入参数计算
+        pure_bond_value = calculate_pure_bond_value(
+            face_value=100,
+            coupon_rate=cb_info.coupon_rate,
+            discount_rate=r, 
+            years_to_maturity=T, 
+            frequency=1  # 年付
+        )
+        
+        
+        
+        
+        
+        
+        # 计算隐含波动率
+        iv = calculate_implied_volatility(option_type, S, K, T, r, (market_price-pure_bond_value)/(100/K))
+        print(f"自算隐含波动率：{iv:.2%}")  
+        
+        indicators=rqdatac.convertible.get_indicators(id,start_date=args.date, end_date=args.date,fields=None)
+        iv2=indicators['iv'].iloc[0]
+        print(f"米筐隐含波动率：{iv2:.2%}")  
+        
+        xx=1
     ####wpg_liquidity 微盘股流动性
     if args.task=='wpg_liquidity':   
         # 存款准备金率
@@ -2838,9 +2959,9 @@ if __name__ == '__main__':
     
     # args.task='stratgy1'
     
-    args.task='hlg_dividend'
-    args.st='20150101'
-    args.et='20250715'
+    # args.task='hlg_dividend'
+    # args.st='20150101'
+    # args.et='20250715'
     
     # args.task='make_backtest_file'
     # args.st='20240101'
@@ -2864,18 +2985,21 @@ if __name__ == '__main__':
     
     # args.task='htldx_index'
     
+    args.task='cb_iv'  ##计算可转债的隐含波动率
+    args.date='20250721'
+    
     # args.task='rq_wpg_make_pms_csv'
     # # args.et=rqdatac.get_latest_trading_date()
-    # args.et=pd.to_datetime('20250710')
+    # args.et=pd.to_datetime('20250721')
     # args.money=200e4
     
     # args.task='rq_wpg_adjust_ATX'
-    # args.pms_file='ATX_csv/持仓查询none.xlsx'
-    # args.start_time='20250630T093000000'
-    # args.end_time=  '20250630T100000000'  
+    # args.pms_file='PMS_csv/共同target_2025-07-21.xlsx' ##目标持仓
+    # args.start_time='20250722T093000000'
+    # args.end_time=  '20250722T100000000'  
     
-    # args.ATX_pos_file='ATX_csv/持仓查询_20250707102438.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-07-07_百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250722091324.xlsx'  ##现有持仓
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-22_百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/持仓查询绝对收益信用_20250523153502.xlsx'
