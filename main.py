@@ -632,6 +632,43 @@ def main(args):
         inputs=pd.concat(inputs,axis=0)
         with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
             inputs.to_excel(writer, sheet_name='', index=False)  
+            print(f'save to {args.file}')       
+            
+    ####make_backtest_file4 制作中证500 beta因子增强的回测所需文件
+    if args.task=='make_backtest_file4':     
+        inputs=[]
+        st=args.st
+        et=args.et
+        dates=rqdatac.get_trading_dates(st, et, market='cn')
+        for date in tqdm(dates[::args.f]): 
+            date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
+            date_n=rqdatac.get_previous_trading_date(date,n=args.days,market='cn')
+
+            weights=rqdatac.index_weights(order_book_id='000905.XSHG', date=date_1)
+            weights=weights.reset_index()
+            
+            factor=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
+                                               date_n, date_1, factors = None,
+                                               industry_mapping='citics_2019', model = 'v2')
+            
+            factor=factor.reset_index()
+            factor=factor.groupby('order_book_id')['beta'].mean()
+            factor=factor.to_frame()
+            factor=factor.sort_values(['beta'],ascending=False)
+            factor=factor.reset_index()
+            
+            chosen=list(factor.iloc[:args.n]['order_book_id'])
+            weights=weights[weights['order_book_id'].isin(chosen)]
+            
+            weights.columns=['TICKER','TARGET_WEIGHT']
+            weights['TRADE_DT']=date.strftime('%Y%m%d')
+            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
+            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
+            weights['TARGET_WEIGHT']=1/len(weights)
+            inputs.append(weights)
+        inputs=pd.concat(inputs,axis=0)
+        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+            inputs.to_excel(writer, sheet_name='', index=False)  
             print(f'save to {args.file}')        
         
 
@@ -757,7 +794,7 @@ def main(args):
     ####rq_wpg_make_pms_csv 根据米筐微盘成分股等权生成pms目标持仓清单
     if args.task=='rq_wpg_make_pms_csv':  
         print('rq_wpg_make_pms_csv...')
-        df=rqdatac.index_weights(order_book_id='866006.RI', date=args.et)
+        df=rqdatac.index_weights(order_book_id=args.id, date=args.et) ##中证500
         df=df.reset_index()
         df.columns=['id','weight']
         
@@ -1190,14 +1227,78 @@ def main(args):
         xx=a
     ####factor_study 因子研究
     if args.task=='factor_study':   
-        explicit=rqdatac.get_factor_return(args.st, args.et, 
+        factors=rqdatac.get_factor_return(args.st, args.et, 
                           factors= None, universe='whole_market',
                           method='implicit',industry_mapping='citics_2019', model = 'v2')
         
-        for factor in explicit.columns:
-            res=explicit[[factor]].cumsum()
+        for factor in factors.columns:
+            res=factors[[factor]].cumsum()
             res[factor].plot(title=factor)
             plt.show()
+        
+        xx=1
+    ####factor_study2 因子研究2-看特定时间段因子表现
+    if args.task=='factor_study2':   
+        factors=rqdatac.get_factor_return(args.st, args.et, 
+                          factors= None, universe='whole_market',
+                          method='implicit',industry_mapping='citics_2019', model = 'v2')
+        
+        cols=['beta', 'book_to_price', 'dividend_yield',
+               'earnings_quality', 'earnings_variability', 'earnings_yield', 'growth',
+               'investment_quality', 'leverage', 'liquidity', 'longterm_reversal',
+               'mid_cap', 'momentum', 'profitability', 'residual_volatility', 'size']
+        
+        
+        # plt.rcParams["font.family"] = ["SimHei", "WenQuanYi Micro Hei", "Heiti TC"]
+        
+        factors_cumsum = factors.cumsum()
+        n = len(cols)
+        
+        # ---------------------- 绘制多子图（按列分布）----------------------
+        # 计算子图网格尺寸（4列布局，自动计算行数）
+        cols_per_row = 5
+        rows = math.ceil(n / cols_per_row)
+        figsize = (30, 5 * rows)  # 宽度15，高度按行数动态调整
+        
+        # 创建子图网格
+        fig, axes = plt.subplots(rows, cols_per_row, figsize=figsize)
+        axes = axes.flatten()  # 展平为一维数组，方便循环
+        
+        # 遍历列名绘制子图
+        for i, col in enumerate(cols):
+            ax = axes[i]
+            ax.plot(factors_cumsum[col])
+            ax.set_title(f"{col}", fontsize=12, pad=10)
+            ax.grid(alpha=0.3)
+        
+        # 隐藏未使用的子图（当列数不足网格总数时）
+        for j in range(i+1, len(axes)):
+            axes[j].axis('off')
+        
+        plt.tight_layout(pad=3)  # 调整子图间距
+        plt.show()
+        
+        # ---------------------- 绘制汇总大图（含所有折线）----------------------
+        plt.figure(figsize=(12, 6))  # 大图尺寸
+        for col in cols:
+            plt.plot(factors_cumsum[col], label=col, linewidth=2)
+        
+        plt.title("所有指标累积和趋势对比", fontsize=14, pad=20)
+        plt.xlabel("时间", fontsize=12)
+        plt.ylabel("累积值", fontsize=12)
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')  # 图例放在右侧
+        plt.grid(alpha=0.3)
+        plt.tight_layout()  # 防止标签被截断
+        plt.show()
+        
+        xx=1
+        
+    ####factor_study3 单因子研究
+    if args.task=='factor_study3':   
+        # exposures=rqdatac.get_factor_exposure(['600519.XSHG','600537.XSHG'],args.st,args.et,factors=None,
+        #                                       industry_mapping='citics_2019', model = 'v2')
+        exposures=rqdatac.get_factor_exposure(['600519.XSHG','603860.XSHG','600406.XSHG','300059.XSHE'],args.st,args.et,factors=None,
+                                              industry_mapping='citics_2019', model = 'v2')
         
         xx=1
     
@@ -2590,8 +2691,8 @@ def main(args):
             def func2(row):
                 if row['flag']:
                     return 0
-                # elif row.name.month in [1,3,4,12]:
-                #     return 0
+                elif row.name.month in [1,3,4,12]:
+                    return 0
                 else:
                     return row['return']
             df['MACD_return']=df.apply(func2, axis=1)
@@ -2893,6 +2994,7 @@ if __name__ == '__main__':
     # H50066.XSHG,"09:31-11:30,13:01-15:00",0.0,沪港AH溢价
     # 000985.XSHG,"09:31-11:30,13:01-15:00",0.0,中证全指
     # 399986.XSHE,"09:31-11:30,13:01-15:00",0.0,中证银行
+    # 000905.XSHG,"09:31-11:30,13:01-15:00",0.0,中证500,XSHG
     
     # args.id1='000001.XSHG' #上证
     # args.id2='399106.XSHE' #深证
@@ -2911,6 +3013,50 @@ if __name__ == '__main__':
     # args.task='factor_study'
     # args.st='20100101'
     # args.et='20250707'    
+    
+    args.task='factor_study2'
+    # args.st='20070205' ##全周期，有数据的第一天
+    # args.et='20250731'    
+    
+    # args.st='20070205'   ##牛市1，有数据的第一天
+    # args.et='20071016'    
+    
+    # args.st='20071016'   ##熊市1
+    # args.et='20081030'    
+    
+    # args.st='20081030'   ##牛市2
+    # args.et='20090804'    
+    
+    # args.st='20090804'   ##熊市2
+    # args.et='20130624'    
+    
+    # args.st='20130624'   ##震荡市1
+    # args.et='20140721'    
+    
+    # args.st='20140721'   ##牛市3
+    # args.et='20150612'    
+    
+    # args.st='20150612'   ##熊市3
+    # args.et='20160128'    
+    
+    # args.st='20160128'   ##牛市4
+    # args.et='20180126'    
+    
+    args.st='20180126'   ##熊市4
+    args.et='20190103'    
+    
+    # args.st='20190103'   ##牛市5
+    # args.et='20210218'    
+    
+    # args.st='20210218'   ##熊市5
+    # args.et='20240924'    
+    
+    # args.st='20240924'   ##牛市6
+    # args.et='20250731'      ##至今
+    
+    # args.task='factor_study3'
+    # args.st='20250729'
+    # args.et='20250729'    
     
     # args.task='zzqz_study'
     # args.st='20200101'
@@ -2945,6 +3091,14 @@ if __name__ == '__main__':
     # args.f=1
     # args.file=r'data/米筐微盘股红利股择时等权日频_1412月空仓.xlsx'
     
+    # args.task='make_backtest_file4'
+    # args.st='20140501'
+    # args.et='20150501'
+    # args.days=5   ##beta因子回看天数
+    # args.f=21   ##调仓频率
+    # args.n=200 ##top多少票
+    # args.file=r'data/中证500beta增强等权周频.xlsx'
+    
     # args.task='backtest'
     # args.st='20200101'
     # args.et='20250319'
@@ -2954,8 +3108,8 @@ if __name__ == '__main__':
     # args.method='MACD_2+crowdness'
     # args.id1='000001.XSHG'
     # args.id2='399106.XSHE'
-    # args.st='20200101'
-    # args.et='20250623'
+    # args.st='20190101'
+    # args.et='20250724'
     
     # args.task='stratgy1'
     
@@ -2985,25 +3139,29 @@ if __name__ == '__main__':
     
     # args.task='htldx_index'
     
-    args.task='cb_iv'  ##计算可转债的隐含波动率
-    args.date='20250721'
+    # args.task='cb_iv'  ##计算可转债的隐含波动率
+    # args.date='20250721'
     
     # args.task='rq_wpg_make_pms_csv'
-    # # args.et=rqdatac.get_latest_trading_date()
-    # args.et=pd.to_datetime('20250721')
-    # args.money=200e4
+    # # args.id='000002.XSHG' ##全A
+    # # args.id='000300.XSHG' ##沪深300
+    # # args.id='399852.XSHE' ##中证1000
+    # # args.id='000905.XSHG' ##中证500
+    # args.id='866006.RI'
+    # args.et=pd.to_datetime('20250725')
+    # args.money=220e4
     
     # args.task='rq_wpg_adjust_ATX'
-    # args.pms_file='PMS_csv/共同target_2025-07-21.xlsx' ##目标持仓
-    # args.start_time='20250722T093000000'
-    # args.end_time=  '20250722T100000000'  
+    # args.pms_file='PMS_csv/共同target_2025-07-25.xlsx' ##目标持仓
+    # args.start_time='20250728T093000000'
+    # args.end_time=  '20250728T100000000'  
     
-    # args.ATX_pos_file='ATX_csv/持仓查询_20250722091324.xlsx'  ##现有持仓
-    # args.ATX_file='ATX_csv/ATX_stock_2025-07-22_百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250728090524.xlsx'  ##现有持仓
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-28_百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
-    # args.ATX_pos_file='ATX_csv/持仓查询绝对收益信用_20250523153502.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-05-26_绝对收益信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-28_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
     
@@ -3024,16 +3182,16 @@ if __name__ == '__main__':
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
     # args.task='ATX_to_ATX_adjust2'   ##正盈利清仓
-    # args.st='20250711T093000000'
-    # args.et='20250711T100000000'  
+    # args.st='20250731T093000000'
+    # args.et='20250731T100000000'  
     # args.ratio=0
     
-    # args.ATX_pos_file='ATX_csv/持仓查询_20250710155606.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-07-11_百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250731090527.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-31_百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
-    # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250526174918.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-05-27_绝对收益信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20250731091312.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-07-31_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
     

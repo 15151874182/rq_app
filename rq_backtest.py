@@ -26,10 +26,10 @@ import rqalpha_mod_fund
 __config__ = {
     "base": {
         "accounts": {
-            "STOCK": 6000000,
+            "STOCK": 2000000,
         },
-        "start_date": "20240101",
-        "end_date": "20251231",
+        "start_date": "20140501",
+        "end_date": "20150501",
     },
     
 
@@ -41,17 +41,17 @@ __config__ = {
     "mod": {
         "sys_analyser": {
             "plot": True,
-            "benchmark": "932000.INDX"
+            "benchmark": "000905.XSHG"
         }
     }
 }
 
 def read_tables_df():
-    # need  pandas version 0.21.0+
+    # need  pd version 0.21.0+
     # need xlrd
-    d_type = {'NAME': str, 'TARGET_WEIGHT': float, 'TICKER': str, 'TRADE_DT': int}
+    d_type = {'NAME': np.str_, 'TARGET_WEIGHT': np.float64, 'TICKER': np.str_, 'TRADE_DT': np.int32}
     columns_name = ["TRADE_DT", "TICKER", "NAME", "TARGET_WEIGHT"]
-    df = pd.read_excel(r'调仓权重2.xlsx', dtype=d_type)
+    df = pd.read_excel(r'data/中证500beta增强等权周频.xlsx', dtype=d_type)
     if not df.columns.isin(d_type.keys()).all():
         raise TypeError("xlsx文件格式必须有{}四列".format(list(d_type.keys())))
     for date, weight_data in df.groupby("TRADE_DT"):
@@ -70,14 +70,14 @@ def on_order_failure(context, event):
 
 # 在这个方法中编写任何的初始化逻辑。context对象将会在你的算法策略的任何方法之间做传递。
 def init(context):
-
+    import rqalpha
+    import rqalpha_mod_fund
     df = read_tables_df()  # 调仓权重文件
     context.target_weight = df
     context.adjust_days = set(context.target_weight.TRADE_DT.to_list())  # 需要调仓的日期
     context.target_queue = []  # 当日需要调仓标的队列
     context.next_target_queue = []  # 次日需要调仓标的队列
     context.current_target_table = dict()  # 当前持仓权重比例
-    subscribe_event(EVENT.ORDER_CREATION_REJECT, on_order_failure)
     subscribe_event(EVENT.ORDER_UNSOLICITED_UPDATE, on_order_failure)
 
 
@@ -112,13 +112,8 @@ def before_trading(context):
 def handle_bar(context, bar_dict):
     if context.target_queue:
         for _ticker in context.target_queue:
-            flag=is_suspended_df.loc[context.now.strftime('%Y-%m-%d'),_ticker]
-            if flag:
-                continue
-        
             _target_weight = context.current_target_table.get(_ticker, 0)
-            # o = order_target_percent(_ticker, round(_target_weight, 6))
-            o = order_shares(_ticker, 200)
+            o = order_target_percent(_ticker, round(_target_weight, 6))
             if o is None:
                 logger.info("[{}]下单失败，该标将于次日下单".format(_ticker))
                 context.next_target_queue.append(_ticker)
@@ -138,30 +133,8 @@ def after_trading(context):
 
 
 if __name__ == '__main__':
-    ### 调仓权重2.xlsx文件的制作
-    inputs=[]
-    st='20240101'
-    et='20250322'
-    dates=rqdatac.get_trading_dates(st, et, market='cn')
-    is_suspendeds=[]
-    for date in tqdm(dates):
-        weights=rqdatac.index_weights(order_book_id='866006.RI', date=date)
-        weights=weights.reset_index()
-        weights.columns=['TICKER','TARGET_WEIGHT']
-        weights['TRADE_DT']=date.strftime('%Y%m%d')
-        weights['NAME']=weights['TICKER'].apply(lambda id:rqdatac.instruments(id, market='cn').symbol)
-        weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
-        is_suspendeds+=list(weights['TICKER'])
-        inputs.append(weights)
-    
-    is_suspendeds_df=pd.DataFrame(set(is_suspendeds),columns=['id'])
-    is_suspended_df=rqdatac.is_suspended(list(is_suspendeds_df['id']), start_date=st,end_date=et)
-    
-    # inputs=pd.concat(inputs,axis=0)
-    
-    # with pd.ExcelWriter('调仓权重2.xlsx', engine='xlsxwriter') as writer:
-    #     inputs.to_excel(writer, sheet_name='', index=False)  
-        
+    from rqalpha_plus import run_func
+
     res=run_func(init=init, before_trading=before_trading, after_trading=after_trading, handle_bar=handle_bar,
-              config=__config__)
-    xx=1
+             config=__config__)
+    xx=a
