@@ -670,6 +670,43 @@ def main(args):
         with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
             inputs.to_excel(writer, sheet_name='', index=False)  
             print(f'save to {args.file}')        
+            
+    ####make_backtest_file5 制作微盘股增强的回测所需文件
+    if args.task=='make_backtest_file5':     
+        inputs=[]
+        st=args.st
+        et=args.et
+        dates=rqdatac.get_trading_dates(st, et, market='cn')
+        for date in tqdm(dates[::args.f]): 
+            date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
+            date_n=rqdatac.get_previous_trading_date(date,n=args.days,market='cn')
+
+            weights=rqdatac.index_weights(order_book_id='866006.RI', date=date_1)
+            weights=weights.reset_index()
+            
+            factor=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
+                                               date_n, date_1, factors = None,
+                                               industry_mapping='citics_2019', model = 'v2')
+            
+            factor=factor.reset_index()
+            factor=factor.groupby('order_book_id')['size'].mean()
+            factor=factor.to_frame()
+            factor=factor.sort_values(['size'],ascending=args.ascending)
+            factor=factor.reset_index()
+            
+            chosen=list(factor.iloc[:args.n]['order_book_id'])
+            weights=weights[weights['order_book_id'].isin(chosen)]
+            
+            weights.columns=['TICKER','TARGET_WEIGHT']
+            weights['TRADE_DT']=date.strftime('%Y%m%d')
+            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
+            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
+            weights['TARGET_WEIGHT']=1/len(weights)
+            inputs.append(weights)
+        inputs=pd.concat(inputs,axis=0)
+        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+            inputs.to_excel(writer, sheet_name='', index=False)  
+            print(f'save to {args.file}')        
         
 
     ####wpg_macd_pred 用微盘股+macd二阶导判断买卖信号
@@ -798,15 +835,29 @@ def main(args):
         df=df.reset_index()
         df.columns=['id','weight']
         
+        ##过滤被立案的
         announcement=rqdatac.get_announcement(list(df['id']),'20240101',args.et)
         cc=announcement[announcement['title'].str.contains('立案')]
         cc=cc.reset_index()
         cc=set(cc['order_book_id'])
-        df=df[~df['id'].isin(cc)] ##过滤被立案的
+        df=df[~df['id'].isin(cc)] 
+        
+        ##取size因子top300的
+        factor=rqdatac.get_factor_exposure(list(df['id']), 
+                                           args.et, args.et, factors = None,
+                                           industry_mapping='citics_2019', model = 'v2')
+        
+        factor=factor.reset_index()
+        factor=factor.groupby('order_book_id')['size'].mean()
+        factor=factor.to_frame()
+        factor=factor.sort_values(['size'],ascending=True)
+        factor=factor.reset_index()
+        chosen=list(factor.iloc[:300]['order_book_id'])
+        df=df[df['id'].isin(chosen)]
+            
+            
         df['weight']=1/len(df) ##重新计算权重
-        
         df['买卖日期']=args.et.strftime('%Y-%m-%d')
-        
         df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
         df['name']=[i.symbol for i in rqdatac.instruments(list(df['id']), market='cn')]
         df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['id']), 
@@ -1295,11 +1346,44 @@ def main(args):
         
     ####factor_study3 单因子研究
     if args.task=='factor_study3':   
-        # exposures=rqdatac.get_factor_exposure(['600519.XSHG','600537.XSHG'],args.st,args.et,factors=None,
-        #                                       industry_mapping='citics_2019', model = 'v2')
-        exposures=rqdatac.get_factor_exposure(['600519.XSHG','603860.XSHG','600406.XSHG','300059.XSHE'],args.st,args.et,factors=None,
-                                              industry_mapping='citics_2019', model = 'v2')
         
+        df=rqdatac.index_weights(order_book_id='866006.RI', date=args.st)
+        df=df.reset_index()
+        df.columns=['id','weight']
+        ids=list(df['id'])
+        factors=rqdatac.get_factor_exposure(ids,args.st,args.et,factors=[args.factor],
+                                              industry_mapping='citics_2019', model = 'v2')
+        factors=factors[args.factor]
+        # factors.index.set_names(['date', 'asset'], inplace=True) 
+        # factors = pd.to_datetime(factors.index.get_level_values(0))
+        
+        
+        df2=rqdatac.get_price(order_book_ids=ids, 
+                  start_date=args.st, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields='close', adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)      
+        df2=df2.reset_index()
+        prices = df2.pivot(index='date', columns='order_book_id', values='close')
+        
+        from alphalens.utils import get_clean_factor_and_forward_returns
+        factor_data = get_clean_factor_and_forward_returns(
+                                                 factors,
+                                                 prices,
+                                                 groupby=None,
+                                                 binning_by_group=False,
+                                                 quantiles=5,
+                                                 bins=None,
+                                                 periods=(1, 5, 10),
+                                                 filter_zscore=20,
+                                                 groupby_labels=None,
+                                                 max_loss=0.35,
+                                                 zero_aware=False,
+                                                 cumulative_returns=True)
+        
+        import alphalens
+        alphalens.tears.create_full_tear_sheet(factor_data)
         xx=1
     
     ####zzqz_study 中证全指研究
@@ -2835,148 +2919,19 @@ def main(args):
                                               end_time=df.index[-1],
                                               days = None,
                                               maxmin=False)
-    ####backtest 回测
-    if args.task=='backtest':         
 
-        __config__ = {
-            "base": {
-                "accounts": {
-                    "STOCK": 6000000,
-                },
-                "start_date": args.st,
-                "end_date": args.et,
-            },
+    ####read_h5 读h5文件
+    if args.task=='read_h5':      
+        import h5py
+        with h5py.File(r'C:\Users\陈天宇\.rqalpha-plus\bundle\indexes.h5', 'r') as h5file:
+            # 2. 查看文件中的数据集（可选，用于确认结构）
+            print("H5文件中的数据集：", list(h5file.keys()))
             
-        
-            # "sys_simulation": {
-            #     "price_limit": False
-            # },
+            dataset = h5file['866006.RI']  # 例如 h5file['data']
+            df = pd.DataFrame(dataset[:])
+            xx=1
             
-
-
             
-            "mod": {
-                "sys_analyser": {
-                    "plot": True,
-                    "benchmark": "866006.RI"
-                    # "benchmark": "932000.INDX"
-                },
-                # 费用模块，该模块的配置项用于调整交易的税费
-                "sys_transaction_cost": {
-                    # 股票最小手续费，单位元
-                    "cn_stock_min_commission": 5,
-                    # 佣金倍率（即将废弃）
-                    "commission_multiplier": 0.125,
-                    # 股票佣金倍率,即在默认的手续费率基础上按该倍数进行调整，股票的默认佣金为万八
-                    "stock_commission_multiplier": 1,
-                    # 期货佣金倍率,即在默认的手续费率基础上按该倍数进行调整，期货默认佣金因合约而异
-                    "futures_commission_multiplier": 1,
-                    # 印花倍率，即在默认的印花税基础上按该倍数进行调整，股票默认印花税为万分之五，单边收取
-                    "tax_multiplier": 1,
-                    # 是否使用回测当时时间点对应的真实印花税率
-                    "pit_tax": False,
-                },
-            }
-        }
-        
-        def read_tables_df():
-            # need  pandas version 0.21.0+
-            # need xlrd
-            d_type = {'NAME': str, 'TARGET_WEIGHT': float, 'TICKER': str, 'TRADE_DT': int}
-            columns_name = ["TRADE_DT", "TICKER", "NAME", "TARGET_WEIGHT"]
-            df = pd.read_excel(args.file, dtype=d_type)
-            if not df.columns.isin(d_type.keys()).all():
-                raise TypeError("xlsx文件格式必须有{}四列".format(list(d_type.keys())))
-            # for date, weight_data in df.groupby("TRADE_DT"):
-            #     if round(weight_data["TARGET_WEIGHT"].sum(), 6) > 1:
-            #         raise ValueError("权重之和出错，请检查{}日的权重".format(date))
-            # 转换为米筐order_book_id
-            df['TICKER'] = df['TICKER'].apply(lambda x: rqdatac.id_convert(x) if ".OF" not in x else x)
-            return df
-        
-        
-        def on_order_failure(context, event):
-            # 拒单时，未成功下单的标的放入第二天下单队列中
-            order_book_id = getattr(event, "order_book_id", None) or getattr(event.order, "order_book_id", None)
-            context.next_target_queue.append(order_book_id)
-        
-        
-        # 在这个方法中编写任何的初始化逻辑。context对象将会在你的算法策略的任何方法之间做传递。
-        def init(context):
-        
-            df = read_tables_df()  # 调仓权重文件
-            context.target_weight = df
-            context.adjust_days = set(context.target_weight.TRADE_DT.to_list())  # 需要调仓的日期
-            context.target_queue = []  # 当日需要调仓标的队列
-            context.next_target_queue = []  # 次日需要调仓标的队列
-            context.current_target_table = dict()  # 当前持仓权重比例
-            subscribe_event(EVENT.ORDER_CREATION_REJECT, on_order_failure)
-            subscribe_event(EVENT.ORDER_UNSOLICITED_UPDATE, on_order_failure)
-        
-        
-        # before_trading此函数会在每天策略交易开始前被调用，当天只会被调用一次
-        def before_trading(context):
-            def dt_2_int_dt(dt):
-                return dt.year * 10000 + dt.month * 100 + dt.day
-        
-            dt = dt_2_int_dt(context.now)
-            if dt in context.adjust_days:
-                today_df = context.target_weight[context.target_weight.TRADE_DT == dt].set_index("TICKER").sort_values(
-                    "TARGET_WEIGHT")
-                context.target_queue = today_df.index.to_list()  # 更新需要调仓的队列
-                context.current_target_table = today_df["TARGET_WEIGHT"].to_dict()
-                context.next_target_queue.clear()
-                # 非目标持仓 需要清空
-                for i in context.portfolio.positions.keys():
-                    if i not in context.target_queue:
-                        # 非目标权重持仓 需要清空
-                        context.target_queue.insert(0, i)
-                    else:
-                        # 当前持仓权重大于目标持仓权重 需要优先卖出获得资金
-                        equity = context.portfolio.positions[i].long.equity + context.portfolio.positions[i].short.equity
-                        total_value = context.portfolio.accounts[instruments(i).account_type].total_value
-                        current_percent = equity / total_value
-                        if current_percent > context.current_target_table[i]:
-                            context.target_queue.remove(i)
-                            context.target_queue.insert(0, i)
-        
-        
-        # 你选择的证券的数据更新将会触发此段逻辑，例如日或分钟历史数据切片或者是实时数据切片更新
-        def handle_bar(context, bar_dict):
-            if context.target_queue:
-                context.target_queue = list(set(context.target_queue))
-                for _ticker in context.target_queue:
-                    # flag=is_suspended_df.loc[context.now.strftime('%Y-%m-%d'),_ticker]
-                    # if flag:
-                    #     continue
-                
-                    _target_weight = context.current_target_table.get(_ticker, 0)
-                    o = order_target_percent(_ticker, round(_target_weight, 6))
-                    if o is None:
-                        logger.info("[{}]下单失败，该标将于次日下单".format(_ticker))
-                        context.next_target_queue.append(_ticker)
-                    else:
-                        logger.info("[{}]下单成功，现下占比{}%".format(_ticker, round(_target_weight, 6) * 100))
-                # 下单完成 下单失败的的在队列context.next_target_queue中
-                context.target_queue.clear()
-        
-        
-        # after_trading函数会在每天交易结束后被调用，当天只会被调用一次
-        def after_trading(context):
-            if context.next_target_queue:
-                context.target_queue += context.next_target_queue
-                context.next_target_queue.clear()
-            if context.target_queue:
-                logger.info("未完成调仓的标的:{}".format(context.target_queue))
-                
-        df = pd.read_excel(args.file)
-        is_suspendeds_df=pd.DataFrame(set(df['TICKER']),columns=['id'])
-        is_suspended_df=rqdatac.is_suspended(list(is_suspendeds_df['id']), 
-                                             start_date=str(df['TRADE_DT'].iloc[0]),
-                                             end_date=str(df['TRADE_DT'].iloc[-1]))
-        res=run_func(init=init, before_trading=before_trading, after_trading=after_trading, handle_bar=handle_bar,
-                  config=__config__)
-        xx=a
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
@@ -3014,7 +2969,7 @@ if __name__ == '__main__':
     # args.st='20100101'
     # args.et='20250707'    
     
-    args.task='factor_study2'
+    # args.task='factor_study2'
     # args.st='20070205' ##全周期，有数据的第一天
     # args.et='20250731'    
     
@@ -3042,8 +2997,8 @@ if __name__ == '__main__':
     # args.st='20160128'   ##牛市4
     # args.et='20180126'    
     
-    args.st='20180126'   ##熊市4
-    args.et='20190103'    
+    # args.st='20180126'   ##熊市4
+    # args.et='20190103'    
     
     # args.st='20190103'   ##牛市5
     # args.et='20210218'    
@@ -3054,9 +3009,10 @@ if __name__ == '__main__':
     # args.st='20240924'   ##牛市6
     # args.et='20250731'      ##至今
     
-    # args.task='factor_study3'
-    # args.st='20250729'
-    # args.et='20250729'    
+    args.task='factor_study3'
+    args.st='20240924'
+    args.et='20250731'    
+    args.factor='size'
     
     # args.task='zzqz_study'
     # args.st='20200101'
@@ -3098,6 +3054,15 @@ if __name__ == '__main__':
     # args.f=21   ##调仓频率
     # args.n=200 ##top多少票
     # args.file=r'data/中证500beta增强等权周频.xlsx'
+    
+    # args.task='make_backtest_file5'
+    # args.st='20180126'
+    # args.et='20190103'
+    # args.days=1   ##size因子回看天数
+    # args.f=5   ##调仓频率
+    # args.n=100 ##top多少票
+    # args.ascending=False ##因子暴露升序/降序
+    # args.file=r'data/微盘股bot100等权周频.xlsx'
     
     # args.task='backtest'
     # args.st='20200101'
@@ -3148,17 +3113,17 @@ if __name__ == '__main__':
     # # args.id='399852.XSHE' ##中证1000
     # # args.id='000905.XSHG' ##中证500
     # args.id='866006.RI'
-    # args.et=pd.to_datetime('20250725')
-    # args.money=220e4
+    # args.et=pd.to_datetime('20250805')
+    # args.money=200e4
     
-    # args.task='rq_wpg_adjust_ATX'
-    # args.pms_file='PMS_csv/共同target_2025-07-25.xlsx' ##目标持仓
-    # args.start_time='20250728T093000000'
-    # args.end_time=  '20250728T100000000'  
+    args.task='rq_wpg_adjust_ATX'
+    args.pms_file='PMS_csv/共同target_2025-08-05.xlsx' ##目标持仓
+    args.start_time='20250806T093000000'
+    args.end_time=  '20250806T100000000'  
     
-    # args.ATX_pos_file='ATX_csv/持仓查询_20250728090524.xlsx'  ##现有持仓
-    # args.ATX_file='ATX_csv/ATX_stock_2025-07-28_百里挑一信用.csv'
-    # args.account='百榕百里挑一稳健一号信用'
+    args.ATX_pos_file='ATX_csv/持仓查询_20250728090524.xlsx'  ##现有持仓
+    args.ATX_file='ATX_csv/ATX_stock_2025-08-06_百里挑一信用.csv'
+    args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'
     # args.ATX_file='ATX_csv/ATX_stock_2025-07-28_绝对收益信用.csv'

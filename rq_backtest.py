@@ -26,10 +26,10 @@ import rqalpha_mod_fund
 __config__ = {
     "base": {
         "accounts": {
-            "STOCK": 2000000,
+            "STOCK": 20000000,
         },
-        "start_date": "20140501",
-        "end_date": "20150501",
+        "start_date": "20180126",
+        "end_date": "20190103",
     },
     
 
@@ -41,7 +41,7 @@ __config__ = {
     "mod": {
         "sys_analyser": {
             "plot": True,
-            "benchmark": "000905.XSHG"
+            "benchmark": "866006.RI"
         }
     }
 }
@@ -51,7 +51,7 @@ def read_tables_df():
     # need xlrd
     d_type = {'NAME': np.str_, 'TARGET_WEIGHT': np.float64, 'TICKER': np.str_, 'TRADE_DT': np.int32}
     columns_name = ["TRADE_DT", "TICKER", "NAME", "TARGET_WEIGHT"]
-    df = pd.read_excel(r'data/中证500beta增强等权周频.xlsx', dtype=d_type)
+    df = pd.read_excel(r'data/微盘股bot100等权周频.xlsx', dtype=d_type)
     if not df.columns.isin(d_type.keys()).all():
         raise TypeError("xlsx文件格式必须有{}四列".format(list(d_type.keys())))
     for date, weight_data in df.groupby("TRADE_DT"):
