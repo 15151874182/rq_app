@@ -750,6 +750,56 @@ def main(args):
             print(f'save to {args.file}')        
         
         x=a
+        
+    ####yz_factor_analysis 制作wind预增指数因子分析
+    if args.task=='yz_factor_analysis':     
+        ress=[]
+        # for date in tqdm(['20250819']): 
+        # for date in tqdm(['20250801','20250808','20250815']): 
+        for date in tqdm(['20250801','20250804','20250805',
+                          '20250806','20250807','20250808',
+                          '20250811','20250812','20250813',
+                          '20250814','20250815','20250818','20250819']): 
+            
+            df=pd.read_excel(f'data/Growth Research/8841090.WI-成分及权重-{date}.xlsx')
+            weights=df['代码'].apply(lambda x:rqdatac.id_convert(x)).to_frame()
+            
+            factor=rqdatac.get_factor_exposure(list(weights['代码']), 
+                                               date, date, factors = None,
+                                               industry_mapping='citics_2019', model = 'v2')
+            
+            res=factor.mean()
+            ress.append([date,res])
+        x=a
+        
+    ####make_backtest_file7 制作wind预增指数回测所需文件
+    if args.task=='make_backtest_file7':     
+        inputs=[]
+        # for date in tqdm(['20250801','20250808','20250815']): 
+        root='data/yz_index'
+        fs=os.listdir(root)
+        for f in tqdm(fs):
+            date=f[11:21].replace('-','')
+            if int(date[:4])<=2020:
+                continue
+            df=pd.read_csv(os.path.join(root,f))
+            
+            weights=df['id'].apply(lambda x:rqdatac.id_convert(x)).to_frame()
+            weights=weights[~weights['id'].str.contains('BJSE')]
+            
+            weights['TARGET_WEIGHT']=1/len(weights)
+
+            weights.columns=['TICKER','TARGET_WEIGHT']
+            weights['TRADE_DT']=date
+            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
+            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
+            inputs.append(weights)
+        inputs=pd.concat(inputs,axis=0)
+        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+            inputs.to_excel(writer, sheet_name='', index=False)  
+            print(f'save to {args.file}')        
+        
+        x=a
 
     ####wpg_macd_pred 用微盘股+macd二阶导判断买卖信号
     if args.task=='wpg_macd_pred':   
@@ -870,7 +920,7 @@ def main(args):
         print(df['market_value'].describe())
         xx=1
         
-    ####rq_wpg_make_pms_csv 根据米筐微盘成分股等权生成pms目标持仓清单
+    ####rq_wpg_make_pms_csv 根据米筐微盘成分股等权生成pms目标持仓清单,liq+size
     if args.task=='rq_wpg_make_pms_csv':  
         print('rq_wpg_make_pms_csv...')
         df=rqdatac.index_weights(order_book_id=args.id, date=args.et) ##中证500
@@ -899,6 +949,63 @@ def main(args):
         liquidity_chosen=set(liquidity_sort['order_book_id'].iloc[:args.n])
         chosen=list(size_chosen.intersection(liquidity_chosen))
         print('len_chosen:',len(chosen))
+            
+            
+        df=df[df['id'].isin(chosen)]
+        df['weight']=1/len(df) ##重新计算权重
+        df['买卖日期']=args.et.strftime('%Y-%m-%d')
+        df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
+        df['name']=[i.symbol for i in rqdatac.instruments(list(df['id']), market='cn')]
+        df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['id']), 
+                  start_date=args.et, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)['close'])   
+        each=args.money/len(df)
+        df['买卖数量']=df['买卖价格'].apply(lambda close:int(each//(close*100)*100))
+        df.loc[(df['证券代码'].str.startswith('688')) & (df['买卖数量'] == 100), '买卖数量'] = 200 ##科创板至少200股
+        df['买卖方向']='买入'
+        res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
+        # cash = {'证券代码': 'CNY', '买卖数量': '700000', '买卖价格': 1, '买卖方向': '划入'}            
+        # cash=pd.DataFrame([cash])
+        # res=pd.concat([cash,df2])   
+        # res=df2
+        # res.insert(0, '买卖日期', '2024-11-26')
+        
+        acc='共同target'  ##文件名和账户名有关联
+        now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
+        path=f'./PMS_csv/{acc}_{now}.xlsx'  
+        with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
+            res.to_excel(writer, sheet_name='导入数据区', index=False)   
+            print(f'save to {path}')
+            res2=df[['id','name']]
+            res2.to_excel(writer, sheet_name='股票名清单', index=False)      
+            
+    ####rq_wpg_make_pms_csv2 根据米筐微盘成分股等权生成pms目标持仓清单,liq
+    if args.task=='rq_wpg_make_pms_csv2':  
+        print('rq_wpg_make_pms_csv2...')
+        df=rqdatac.index_weights(order_book_id=args.id, date=args.et) ##中证500
+        df=df.reset_index()
+        df.columns=['id','weight']
+        
+        ##过滤被立案的
+        announcement=rqdatac.get_announcement(list(df['id']),'20240101',args.et)
+        cc=announcement[announcement['title'].str.contains('立案')]
+        cc=cc.reset_index()
+        cc=set(cc['order_book_id'])
+        df=df[~df['id'].isin(cc)] 
+        
+        
+        #取size和liquidity top300的交集
+        factor=rqdatac.get_factor_exposure(list(df['id']), 
+                                           args.et, args.et, factors = ['size','liquidity'],
+                                           industry_mapping='citics_2019', model = 'v2')
+        
+        liquidity_sort=factor.sort_values('liquidity',ascending=True)
+        liquidity_sort=liquidity_sort.reset_index()
+        
+        chosen=list(liquidity_sort['order_book_id'].iloc[:args.n])
             
             
         df=df[df['id'].isin(chosen)]
@@ -1083,6 +1190,67 @@ def main(args):
         
         df.to_csv(args.ATX_file,index=False)
         
+    if args.task=='ATX_to_ATX_adjust3':    
+        ####ATX_to_ATX_adjust3 根据ATX的实时监控.xlsx,生成csv，用于ATX 将正盈利的票按百分比减仓
+        print('ATX_to_ATX_adjust3...')
+
+        df=pd.read_excel(args.ATX_pos_file,dtype=str)
+        
+        df['证券市场']=df['交易市场'].apply(lambda x:'SZ' if x=='深交所' else 'SH')
+        df['证券代码']=df['证券代码']+'.'+df['证券市场']
+        df['当前拥股']=df['持仓数量'].apply(int)
+        df['最新价']=df['最新价'].apply(float)
+        df['持仓盈亏']=df['持仓盈亏'].apply(float)
+        df['持仓市值']=df['最新价']*df['当前拥股']
+        total_market=df['持仓市值'].sum()
+        reduce=total_market*(1-args.ratio)
+        df=df[df['持仓盈亏'].apply(lambda x: float(x))>0] ##正盈利的清仓
+        df=df.sort_values(['持仓盈亏'],ascending=False)
+        
+        s=0
+        res=[]
+        for index, row in df.iterrows():
+            s+=row.持仓市值
+            res.append(index)
+            if s>reduce:
+                break
+        df=df.loc[res]
+        df['目标拥股']=0
+        df['调整股数']=df['目标拥股']-df['当前拥股']
+        # df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
+        df=df.sort_values('调整股数',ascending=True)
+        df=df[df['调整股数']!=0]
+        
+        df['算法类型']='TWAP'
+        df['账户名称']=args.account
+        df['算法实例']='kf_twap_plus'
+        df['证券代码']=df['证券代码']
+        df['交易方向']=df['调整股数'].apply(lambda x:'买入' if x>0 else '卖出')
+        df['任务数量']=df['调整股数'].apply(abs)
+        df['开始时间']=args.st
+        df['结束时间']=args.et
+        df['涨跌停是否继续执行']='涨停不卖跌停不买'
+        df['过期后是否继续执行']='否'
+        df['其他参数']=np.nan
+        df['交易市场']=np.nan
+        
+        columns=['算法类型',
+                '账户名称',
+                '算法实例',
+                '证券代码',
+                '任务数量',
+                '交易方向',
+                '开始时间',
+                '结束时间',
+                '涨跌停是否继续执行',
+                '过期后是否继续执行',
+                '其他参数',
+                '交易市场']
+        df=df[columns]
+        
+        df.to_csv(args.ATX_file,index=False)
+        print(f'save to {args.ATX_file}')
+        
     if args.task=='ATX_to_PMS_track':    
         ####ATX_to_PMS_track 根据实际ATX 成交查询.xlsx 成交价格，生成PMS单 追踪
         print('ATX_to_PMS_track...')
@@ -1230,6 +1398,66 @@ def main(args):
         
         res=wpg[['wpg_drawdown']].join(zz1000[['zz1000_drawdown']])
         xx=res[res['wpg_drawdown']<-0.1]
+        xx=a
+        
+    ####yz_return_study 预增指数每月收益研究
+    if args.task=='yz_return_study':   
+        
+        df=pd.read_excel('data/8841090.WI.xlsx',index_col='日期',parse_dates=True)
+        
+        df['year'] = df.index.year
+        df['month'] = df.index.month
+        df.rename(columns={'收盘价(元)': 'close'}, inplace=True)
+        
+        group1=list(df.groupby(['year', 'month']))
+        ys=[]
+        for i,item in enumerate(group1):
+            if i==0:
+                y=group1[i][1]['close'].iloc[-1] / group1[i][1]['close'].iloc[0] - 1
+            else:
+                y=group1[i][1]['close'].iloc[-1] / group1[i-1][1]['close'].iloc[-1] - 1
+            ys.append([item[0],y])
+            
+        df1 = pd.DataFrame(ys, columns=['Date', 'Return'])
+        df1['Year'], df1['Month'] = zip(*df1['Date'])
+        df1 = df1.drop(columns=['Date'])
+        df1 = df1.pivot(index='Year', columns='Month', values='Return')                
+        df1['年度累计'] = (df1.iloc[:, :12]+1).prod(axis=1)-1
+        # monthly_returns = df1.applymap(lambda x: "{:.2%}".format(x))
+        monthly_returns=df1
+        monthly_returns.index.name='月度收益'
+        res_wpg=monthly_returns.describe()
+        
+        xx=monthly_returns.iloc[:,:12]
+        xx = np.where(xx > 0, 1, -1) #正收益为1，负收益-1
+        xx = xx.flatten().tolist()
+        xx=xx[:-6] ##去掉最后位nan的6个月
+        
+        def count_consecutive(xx): ##统计连续1 和-1 的长度
+            if not xx:  # 处理空列表
+                return {'-1': [], '1': []}
+            
+            result = {'-1': [], '1': []}
+            current_val = xx[0]  # 初始当前值为第一个元素
+            current_length = 1   # 初始长度为1
+            
+            for num in xx[1:]:   # 从第二个元素开始遍历
+                if num == current_val:
+                    current_length += 1  # 与当前值相同，长度+1
+                else:
+                    # 遇到不同值，保存当前长度到对应键的列表
+                    result[str(current_val)].append(current_length)
+                    current_val = num    # 更新当前值为新值
+                    current_length = 1   # 重置长度为1
+            
+            # 遍历结束后，保存最后一个连续段的长度
+            result[str(current_val)].append(current_length)
+            return result
+        
+        dic=count_consecutive(xx)
+        
+        
+
         xx=a
         
     ####wpg_hlg_return_study 微盘股和红利股每月收益研究
@@ -3092,10 +3320,15 @@ if __name__ == '__main__':
     # args.et='20250707'    
     
     args.task='factor_study2'
-    args.st='20250801' ##全周期，有数据的第一天
-    args.et='20250818'    
+    args.st='20250101' ##全周期，有数据的第一天
+    args.et='20250826'    
     args.universe='whole_market'
-    # args.universe='000852.XSHG' ##2014-10-20开始
+    # args.universe='000300.XSHG'   ##300
+    # args.universe='000905.XSHG'   ##500
+    # args.universe='000906.XSHG'   ##800
+    # args.universe='000852.XSHG' ##1000
+    # args.universe='399303.XSHE' ##2000
+    
     
     # args.st='20070205'   ##牛市1，有数据的第一天
     # args.et='20071016'    
@@ -3159,6 +3392,10 @@ if __name__ == '__main__':
     # args.st='20170101'
     # args.et='20250611'
     
+    # args.task='yz_return_study'
+    # args.st='20170101'
+    # args.et='20250819'
+    
     # args.task='wpg_hlg_return_study'
     # args.st='20170101'
     # args.et='20250812'
@@ -3186,16 +3423,21 @@ if __name__ == '__main__':
     # args.task='make_backtest_file5'
     # # args.id='866006.RI'
     # # args.id='000985.XSHG'
-    # args.id='399303.XSHE'
-    # # args.id='000852.XSHG'
-    # args.st='20170101'
+    # # args.id='399303.XSHE'
+    # args.id='000852.XSHG'
+    
+    # args.st='20240924'
     # args.et='20250731'
     # args.days=1   ##因子回看天数
-    # args.f=21   ##调仓频率
+    # args.f=5   ##调仓频率
     # args.n=300 ##top多少票
-    # args.factor='earnings_yield'
-    # args.ascending=False ##因子暴露升序/降序
-    # # args.file=r'data/微盘股增强等权周频.xlsx'
+    # # args.factor='size'
+    # # args.ascending=True ##因子暴露升序/降序
+    # args.factor='liquidity'
+    # args.ascending=True ##因子暴露升序/降序
+    # # args.factor='beta'
+    # # args.ascending=False ##因子暴露升序/降序
+    # args.file=r'data/微盘股增强等权周频.xlsx'
     # args.file=r'data/全A增强等权月频.xlsx'
     
     # args.task='make_backtest_file6'  ##综合size+liquidity因子
@@ -3203,7 +3445,12 @@ if __name__ == '__main__':
     # args.id='000852.XSHG'
     # # args.id='399303.XSHE'
     # # args.id='866006.RI'
-  
+    
+    # args.task='make_backtest_file7'  ##制作wind预增指数回测所需文件
+    # args.file=r'data/wind预增指数周频2.xlsx'
+    
+    # args.task='yz_factor_analysis'  ##预增指数因子分析
+        
     # args.st='20170611'
     # args.et='20250814'
     # args.days=1   ##因子回看天数
@@ -3263,7 +3510,7 @@ if __name__ == '__main__':
     # args.task='cb_iv'  ##计算可转债的隐含波动率
     # args.date='20250721'
     
-    # args.task='rq_wpg_make_pms_csv'
+    # args.task='rq_wpg_make_pms_csv'   ##size+liq
     # # args.id='000002.XSHG' ##全A
     # # args.id='000300.XSHG' ##沪深300
     # # args.id='399852.XSHE' ##中证1000
@@ -3273,17 +3520,27 @@ if __name__ == '__main__':
     # args.money=200e4
     # args.n=300 ##top多少票
     
+    # args.task='rq_wpg_make_pms_csv2'     ##liq
+    # # args.id='000002.XSHG' ##全A
+    # # args.id='000300.XSHG' ##沪深300
+    # # args.id='399852.XSHE' ##中证1000
+    # # args.id='000905.XSHG' ##中证500
+    # args.id='866006.RI'
+    # args.et=pd.to_datetime('20250822')
+    # args.money=450e4
+    # args.n=300 ##top多少票
+    
     # args.task='rq_wpg_adjust_ATX'
-    # args.pms_file='PMS_csv/共同target_2025-08-15.xlsx' ##目标持仓
-    # args.start_time='20250818T093000000'
-    # args.end_time=  '20250818T100000000'  
+    # args.pms_file='PMS_csv/共同target_2025-08-22.xlsx' ##目标持仓
+    # args.start_time='20250825T093000000'
+    # args.end_time=  '20250825T100000000'  
     
-    # # args.ATX_pos_file='ATX_csv/持仓查询_20250818090103.xlsx'  ##现有持仓
-    # # args.ATX_file='ATX_csv/ATX_stock_2025-08-18_百里挑一信用.csv'
-    # # args.account='百榕百里挑一稳健一号信用'
+    # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250825090320.xlsx'  ##现有持仓
+    # args.ATX_file='ATX_csv/ATX_stock_2025-08-25_百里挑一信用.csv'
+    # args.account='百榕百里挑一稳健一号信用'
     
-    # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250818090858.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-08-18_绝对收益信用.csv'
+    # args.ATX_pos_file='ATX_csv/绝对收益持仓查询_20250825090355.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-08-25_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
     
@@ -3304,17 +3561,30 @@ if __name__ == '__main__':
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
     # args.task='ATX_to_ATX_adjust2'   ##正盈利清仓
-    # args.st='20250731T093000000'
-    # args.et='20250731T100000000'  
-    # args.ratio=0
+    # args.st='20250827T130000000'
+    # args.et='20250827T133000000'  
+    # args.ratio=0.95
     
-    # args.ATX_pos_file='ATX_csv/持仓查询_20250731090527.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-07-31_百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250827121430.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-08-27_百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/持仓查询_20250731091312.xlsx'
     # args.ATX_file='ATX_csv/ATX_stock_2025-07-31_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
+    
+    args.task='ATX_to_ATX_adjust3'   ##正盈利清仓
+    args.st='20250827T130000000'
+    args.et='20250827T133000000'  
+    args.ratio=0.95 ##保持多少仓位，0.95是降低5%仓位
+    
+    # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250827121430.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-08-27_百里挑一信用.csv'
+    # args.account='百榕百里挑一稳健一号信用'
+    
+    args.ATX_pos_file='ATX_csv/全天候持仓查询_20250827131539.xlsx'
+    args.ATX_file='ATX_csv/ATX_stock_2025-08-27_绝对收益信用.csv'
+    args.account='百榕全天候宏观对冲绝对收益信用'
     
     
     # args.task='opt_wpg_hlg_bond'
@@ -3323,9 +3593,9 @@ if __name__ == '__main__':
     # args.st='20190101'
     # args.et='20250701'
     
-    args.task='yz_study'
-    args.st='20150101'
-    args.et='20250818'
+    # args.task='yz_study'
+    # args.st='20150101'
+    # args.et='20250818'
     
     # args.task='basis_study'
     # args.st='20150101'
