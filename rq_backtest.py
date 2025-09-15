@@ -28,21 +28,39 @@ __config__ = {
         "accounts": {
             "STOCK": 20000000,
         },
-        "start_date": "20210108",
-        "end_date": "20250825",
+        "start_date": "20180126",
+        "end_date": "20250731",
+        # 是否开启期货历史交易参数进行回测
+        # "futures_time_series_trading_parameters": True,
     },
     
     "mod": {
         "sys_simulation": {
             "price_limit": True  ##True是不允许涨跌停状态下买入、卖出
         },
+        # 费用模块，该模块的配置项用于调整交易的税费
+        "sys_transaction_cost": {
+            # 股票最小手续费，单位元
+            # "cn_stock_min_commission": 5,
+            # 佣金倍率（即将废弃）
+            # "commission_multiplier": 1,
+            # 股票佣金倍率,即在默认的手续费率基础上按该倍数进行调整，股票的默认佣金为万八
+            "stock_commission_multiplier": 1/8,
+            # 期货佣金倍率,即在默认的手续费率基础上按该倍数进行调整，期货默认佣金因合约而异
+            # "futures_commission_multiplier": 1,
+            # 印花倍率，即在默认的印花税基础上按该倍数进行调整，股票默认印花税为万分之五，单边收取
+            # "tax_multiplier": 1,
+            # 是否使用回测当时时间点对应的真实印花税率
+            # "pit_tax": False,
+        },
         "sys_analyser": {
             "plot": True,
             # "benchmark": '000985.XSHG'
-            # "benchmark": '000852.XSHG'
+            "benchmark": '000852.XSHG'
             # "benchmark": '000300.XSHG'
+            # "benchmark": '000906.XSHG'   #800
             # "benchmark": "399303.XSHE"
-            "benchmark": "866006.RI"
+            # "benchmark": "866006.RI"
         }
     }
 }
@@ -52,7 +70,7 @@ def read_tables_df():
     # need xlrd
     d_type = {'NAME': np.str_, 'TARGET_WEIGHT': np.float64, 'TICKER': np.str_, 'TRADE_DT': np.int32}
     columns_name = ["TRADE_DT", "TICKER", "NAME", "TARGET_WEIGHT"]
-    df = pd.read_excel(r'data/wind预增指数周频2.xlsx', dtype=d_type)
+    df = pd.read_excel(r'data/1000增强等权周频.xlsx', dtype=d_type)
     if not df.columns.isin(d_type.keys()).all():
         raise TypeError("xlsx文件格式必须有{}四列".format(list(d_type.keys())))
     for date, weight_data in df.groupby("TRADE_DT"):
