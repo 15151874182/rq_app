@@ -55,31 +55,49 @@ def main(args):
         res.to_csv('DFCF_csv/input/test.order2.csv',index=False)
         xx=1
 
-    ####rq_wpg_make_pms_csv2 根据米筐微盘成分股等权生成pms目标持仓清单,liq
-    if args.task=='rq_wpg_make_pms_csv2':  
-        print('rq_wpg_make_pms_csv2...')
-        df=rqdatac.index_weights(order_book_id=args.id, date=args.et) ##中证500
-        df=df.reset_index()
+    ####!!!!!!!rq_wpg_make_pms_csv3 根据任意池子+任意因子等权生成pms目标持仓清单
+    if args.task=='rq_wpg_make_pms_csv3':  
+        print('rq_wpg_make_pms_csv3...')
+        
+        weights=[]
+        for id in args.ids:
+            part=rqdatac.index_weights(order_book_id=id, date=args.et)
+            weights.append(part)
+        weights=pd.concat(weights)
+        weights=weights.reset_index()
+        weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
+        
+        #过滤被立案的
+        announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20240101',args.et)
+        cc=announcement[announcement['title'].str.contains('立案')]
+        cc=cc.reset_index()
+        cc=set(cc['order_book_id'])
+        weights=weights[~weights['order_book_id'].isin(cc)]        
+        
+        n=len(args.factors)
+        chosen=set(weights['order_book_id'])
+        if n==1:  ##1000+2000,size,liq,beta,交集100
+            top_n=100
+        elif n==2:
+            top_n=850
+        elif n==3:
+            top_n=1250
+        for factor in args.factors:
+            exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
+                                               args.et, args.et, factors = factor,
+                                               industry_mapping='citics_2019', model = 'v2')
+            if factor=='size' or factor=='liquidity':
+                sort=exposure.sort_values(factor,ascending=True)
+            elif factor=='beta':
+                sort=exposure.sort_values(factor,ascending=False)
+            sort=sort.reset_index()
+            chosen2=set(sort['order_book_id'].iloc[:top_n])
+            chosen=chosen & chosen2
+            
+        df=weights[weights['order_book_id'].isin(chosen)]
         df.columns=['id','weight']
         
-        # ##过滤被立案的
-        # announcement=rqdatac.get_announcement(list(df['id']),'20240101',args.et)
-        # cc=announcement[announcement['title'].str.contains('立案')]
-        # cc=cc.reset_index()
-        # cc=set(cc['order_book_id'])
-        # df=df[~df['id'].isin(cc)] 
-        
-        factor=rqdatac.get_factor_exposure(list(df['id']), 
-                                           args.et, args.et, factors = ['liquidity'],
-                                           industry_mapping='citics_2019', model = 'v2')
-        
-        liquidity_sort=factor.sort_values('liquidity',ascending=True)
-        liquidity_sort=liquidity_sort.reset_index()
-        
-        chosen=set(liquidity_sort['order_book_id'].iloc[:args.n])
             
-            
-        df=df[df['id'].isin(chosen)]
         df['weight']=1/len(df) ##重新计算权重
         df['买卖日期']=args.et.strftime('%Y-%m-%d')
         df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
@@ -95,6 +113,24 @@ def main(args):
         df.loc[(df['证券代码'].str.startswith('688')) & (df['买卖数量'] == 100), '买卖数量'] = 200 ##科创板至少200股
         df['买卖方向']='买入'
         res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
+        res=res[res['买卖数量']!=0] ##去掉价格过高，分配不到100股的票
+        money=sum(res['买卖价格']*res['买卖数量'])
+        
+        buy_money=res[res['买卖方向']=='买入']
+        if len(buy_money)!=0:
+            buy_money=sum(buy_money['买卖价格']*buy_money['买卖数量'])
+        else:
+            buy_money=0
+            
+        sell_money=res[res['买卖方向']=='卖出']
+        if len(sell_money)!=0:
+            sell_money=sum(buy_money['买卖价格']*buy_money['买卖数量'])
+        else:
+            sell_money=0        
+        print('总数:',money)
+        print('买入:',buy_money)
+        print('卖出:',sell_money)
+        
         
         acc='仿真篮子'  ##文件名和账户名有关联
         now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
@@ -119,15 +155,20 @@ if __name__ == '__main__':
     # args.task='make_order'
     
     
-    args.task='rq_wpg_make_pms_csv2'     ##liq
-    # args.id='000002.XSHG' ##全A
-    # args.id='000300.XSHG' ##沪深300
-    # args.id='399852.XSHE' ##中证1000
-    # args.id='000905.XSHG' ##中证500
-    args.id='866006.RI'
-    args.et=pd.to_datetime('20250912')
-    args.money=200e4
-    args.n=300 ##top多少票
+    args.task='rq_wpg_make_pms_csv3'     ##liq
+    args.ids=[
+              '000852.XSHG',
+              '932000.INDX',
+              # '866006.RI',
+              ]
+    
+    args.factors=[
+        # 'size',
+        'beta',
+        'liquidity',
+        ]
+    args.et=pd.to_datetime('20250919')
+    args.money=162e4
     
     main(args)
     
