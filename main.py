@@ -332,6 +332,97 @@ def main(args):
             print(f'save to {args.file}')        
         
         x=a
+        
+    ####!!!!!!!!!make_backtest_file00 自制因子
+    if args.task=='make_backtest_file00':     
+        inputs=[]
+        st=args.st
+        et=args.et
+        dates=rqdatac.get_trading_dates(st, et, market='cn')
+        len_chosen=[]
+        for date in tqdm(dates[::args.f]): 
+            date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
+            date_n=rqdatac.get_previous_trading_date(date,n=args.days,market='cn')
+            
+            weights=[]
+            for id in args.ids:
+                part=rqdatac.index_weights(order_book_id=id, date=date_1)
+                weights.append(part)
+            weights=pd.concat(weights)
+            weights=weights.reset_index()
+            weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
+
+            n=len(args.factors)
+            chosen=set(weights['order_book_id'])
+            if n==1:  ##1000+2000,size,liq,beta,交集100
+                top_n=100
+            elif n==2:
+                top_n=800
+            elif n==3:
+                top_n=1250
+            # if n==1:  ##1000+2000,size,liq,beta,交集200
+            #     top_n=200
+            # elif n==2:
+            #     top_n=1000
+            # elif n==3:
+            #     top_n=1450
+            # if n==1:  ##1000+2000,size,liq,beta,交集300
+            #     top_n=300
+            # elif n==2:
+            #     top_n=1200
+            # elif n==3:
+            #     top_n=1550
+            
+            
+            ##size复现
+            shares=rqdatac.get_shares(list(weights['order_book_id']), start_date=date, end_date=date, fields=None, market='cn', expect_df=True)['total_a'] 
+            shares.index = shares.index.get_level_values(0)
+
+            close=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='none', skip_suspended =False, market='cn',  ##要不复权的价格！！！
+                      expect_df=True,time_slice=None)['close']
+            close.index = close.index.get_level_values(0)
+            
+            df=weights.set_index('order_book_id')
+            
+            shares = shares.to_frame(name='total_share') 
+            close = close.to_frame(name='close') 
+            df=df.join(shares).join(close)
+            
+            df['market_value']=df['close']*df['total_share'] ##总市值
+            df=df.sort_values('market_value',ascending=True)
+            chosen2=set(df.index[:top_n])
+            
+            ##liquidity复现
+            # turnover=rqdatac.get_turnover_rate(list(weights['order_book_id']), 
+            #                                    start_date=date, end_date=date, 
+            #                                    fields=None,expect_df=True)
+            # turnover.index = turnover.index.get_level_values(0)
+            # turnover = turnover[~(turnover == 0).all(axis=1)]
+            # turnover['liquidity']=0.35*turnover['week']+0.35*turnover['month']+0.3*turnover['year']
+            # turnover=turnover.sort_values('liquidity',ascending=True)
+            # chosen2=set(turnover.index[:top_n])
+            
+            
+            chosen=chosen & chosen2
+                
+            weights=weights[weights['order_book_id'].isin(chosen)]
+            
+            weights.columns=['TICKER','TARGET_WEIGHT']
+            weights['TRADE_DT']=date.strftime('%Y%m%d')
+            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
+            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
+            weights['TARGET_WEIGHT']=1/len(weights)
+            inputs.append(weights)
+        inputs=pd.concat(inputs,axis=0)
+        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+            inputs.to_excel(writer, sheet_name='', index=False)  
+            print(f'save to {args.file}')        
+        
+        x=a
 
         
     ####make_backtest_file 制作回测所需文件
@@ -1059,6 +1150,94 @@ def main(args):
         #            'MACD_pct_change', 'MACD_flag']].iloc[-30:].to_csv(args.file)
 
 
+    ####compare_rq_cty_size_factor 对比自己复现和米筐的size因子排序是否一致
+    if args.task=='compare_rq_cty_size_factor':  
+        print('compare_rq_cty_size_factor...')
+        
+        df=rqdatac.index_weights(order_book_id='866006.RI', date=args.et)
+        
+        shares=rqdatac.get_shares(list(df.index), start_date=args.et, end_date=args.et, fields=None, market='cn', expect_df=True)['total_a'] ##A股总股本
+        shares.index = shares.index.get_level_values(0)
+
+        close=rqdatac.get_price(order_book_ids=list(df.index), 
+                  start_date=args.et, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='none', skip_suspended =False, market='cn',  ##要不复权的价格！！！
+                  expect_df=True,time_slice=None)['close']
+        close.index = close.index.get_level_values(0)
+        
+        df=pd.DataFrame([df,close,shares]).T
+        df.columns=['weight','close','total_share']
+        df['market_value']=df['close']*df['total_share'] ##总市值
+        df=df.sort_values('market_value',ascending=True)
+        
+        factor=rqdatac.get_factor_exposure(list(df.index), 
+                                           args.et, args.et, factors = ['size'],
+                                           industry_mapping='citics_2019', model = 'v2')
+        
+        size_sort=factor.sort_values('size',ascending=True)
+        size_sort.index = size_sort.index.get_level_values(1)
+        print(df.index==size_sort.index)
+        xx=1
+        
+    ####！！！！compare_rq_cty_liquidity_factor 对比自己复现和米筐的liquidity因子排序是否一致
+    if args.task=='compare_rq_cty_liquidity_factor':  
+        print('compare_rq_cty_liquidity_factor...')
+        
+        df=rqdatac.index_weights(order_book_id='866006.RI', date=args.et)
+        
+        # date_1=rqdatac.get_previous_trading_date(args.et,n=1,market='cn')
+        # date_252=rqdatac.get_previous_trading_date(args.et,n=252,market='cn')
+        # turnover=rqdatac.get_turnover_rate(list(df.index), 
+        #                                    start_date=date_252, end_date=date_1, 
+        #                                    fields=None,expect_df=True)        
+        # turnover=turnover.reset_index()
+        # def func(df):
+        #     STOM=np.log(df['today'][-21:].sum())
+        #     STOQ=np.log(df['today'][-21*3:].sum())
+        #     STOA=np.log(df['today'][-21*12:].sum())
+            
+        #     # # 步骤1：计算衰减系数λ
+        #     # lambda_ = np.log(2) / 63 
+        #     # # 步骤2：生成原始指数衰减权重（最近数据权重最高）
+        #     # n = len(df)  # 252
+        #     # t = np.arange(n)  # t = [0, 1, ..., 251]，对应t-1（i从0开始）
+        #     # raw_weights = np.exp(-lambda_ * t)  # 原始权重：最近一天(t=0)权重=exp(0)=1，最早一天(t=251)权重最小
+        #     # # 步骤3：归一化权重（确保总和为1）
+        #     # normalized_weights = raw_weights / raw_weights.sum()
+        #     # # 将权重添加到DataFrame（注意：权重与原始数据顺序一致，即最早数据对应最小权重，最近数据对应最大权重）
+        #     # df['weight'] = normalized_weights[::-1]
+        #     # ATVR=(df['today']*df['weight']).mean()
+        #     return 0.35*STOM+0.35*STOQ+0.3*STOA
+        
+        # turnover=turnover.groupby('order_book_id').apply(func)
+        # turnover=turnover.sort_values(ascending=True)
+        
+        turnover=rqdatac.get_turnover_rate(list(df.index), 
+                                           start_date=args.et, end_date=args.et, 
+                                           fields=None,expect_df=True)
+        turnover.index = turnover.index.get_level_values(0)
+        turnover['liquidity']=0.35*turnover['week']+0.35*turnover['month']+0.3*turnover['year']
+        turnover=turnover.sort_values('liquidity',ascending=True)
+        
+        factor=rqdatac.get_factor_exposure(list(df.index), 
+                                           args.et, args.et, factors = ['liquidity'],
+                                           industry_mapping='citics_2019', model = 'v2')
+        
+        liquidity_sort=factor.sort_values('liquidity',ascending=True)
+        liquidity_sort.index = liquidity_sort.index.get_level_values(1)
+        print(turnover.index==liquidity_sort.index)
+        
+        n=100
+        s1=set(turnover.index[:n])
+        s2=set(liquidity_sort.index[:n])
+        print(len(s1 & s2))
+        # s3=set(df.index[:n])
+        # print(len(s1 & s3))
+        xx=1
+        
+        
     ####wpg_market_value_median 查看微盘股市值中位数
     if args.task=='wpg_market_value_median':  
         print('wpg_market_value_median...')
@@ -3850,14 +4029,14 @@ if __name__ == '__main__':
     # args.st='20100101'
     # args.et='20250707'    
     
-    # args.task='factor_study2'
-    # args.st='20250601' ##全周期，有数据的第一天
-    # args.et='20250919'    
-    # # args.universe='whole_market'
-    # # args.universe='000300.XSHG'   ##300
-    # # args.universe='000905.XSHG'   ##500
-    # # args.universe='000906.XSHG'   ##800
-    # # args.universe='000852.XSHG' ##1000
+    args.task='factor_study2'
+    args.st='20250701' ##全周期，有数据的第一天
+    args.et='20250923'    
+    # args.universe='whole_market'
+    # args.universe='000300.XSHG'   ##300
+    # args.universe='000905.XSHG'   ##500
+    # args.universe='000906.XSHG'   ##800
+    args.universe='000852.XSHG' ##1000
     # args.universe='399303.XSHE' ##国证2000
     
     
@@ -3959,17 +4138,35 @@ if __name__ == '__main__':
     #           ]
     
     # args.factors=[
-    #     # 'size',
-    #     'beta',
-    #     'liquidity',
+    #     'size',
+    #     # 'beta',
+    #     # 'liquidity',
     #     ]
-    # args.st='20250819'
-    # # args.st='20230901'
+    # # args.st='20250819'
+    # args.st='20230901'
     # args.et='20250919'
     # args.days=1   ##因子回看天数
     # args.f=5   ##调仓频率
-    # # args.n=300 ##top多少票
     # args.file=r'data/增强等权周频.xlsx'
+    
+    args.task='make_backtest_file00' ##自制因子
+    args.ids=[
+              '000852.XSHG',
+              '932000.INDX',
+              # '866006.RI',
+              ]
+    
+    args.factors=[
+        # 'size',
+        # 'beta',
+        'liquidity',
+        ]
+    # args.st='20250819'
+    args.st='20230901'
+    args.et='20250919'
+    args.days=1   ##因子回看天数
+    args.f=5   ##调仓频率
+    args.file=r'data/增强等权周频.xlsx'
     
     # args.task='make_backtest_file2'
     # args.st='20250407'
@@ -4170,20 +4367,20 @@ if __name__ == '__main__':
     # args.money=230e4
     # args.n=300 ##top多少票
     
-    args.task='rq_wpg_make_pms_csv3'     ##liq
-    args.ids=[
-              '000852.XSHG',
-              '932000.INDX',
-              # '866006.RI',
-              ]
+    # args.task='rq_wpg_make_pms_csv3'     ##liq
+    # args.ids=[
+    #           '000852.XSHG',
+    #           '932000.INDX',
+    #           # '866006.RI',
+    #           ]
     
-    args.factors=[
-        # 'size',
-        'beta',
-        'liquidity',
-        ]
-    args.et=pd.to_datetime('20250919')
-    args.money=162e4
+    # args.factors=[
+    #     # 'size',
+    #     'beta',
+    #     'liquidity',
+    #     ]
+    # args.et=pd.to_datetime('20250924')
+    # args.money=162e4
     
     
     
@@ -4263,6 +4460,12 @@ if __name__ == '__main__':
     # args.task='download'
     # args.st='20100101'
     # args.et='20250630'
+    
+    # args.task='compare_rq_cty_size_factor'
+    # args.et=20250915
+    
+    # args.task='compare_rq_cty_liquidity_factor'
+    # args.et=20250915
     
     # args.task='crowdedness'
     # args.id1='000001.XSHG'

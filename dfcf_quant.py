@@ -167,7 +167,7 @@ if __name__ == '__main__':
         'beta',
         'liquidity',
         ]
-    args.et=pd.to_datetime('20250919')
+    args.et=pd.to_datetime('20250924')
     args.money=162e4
     
     main(args)
