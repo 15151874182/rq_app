@@ -167,6 +167,19 @@ class General:
         return normalized_list
     
     @staticmethod    
+    def generate_decay_weight(df,col='weight',half=63):
+        lambda_ = np.log(2) / half 
+        # 步骤2：生成原始指数衰减权重（最近数据权重最高）
+        n = len(df)  # 252
+        t = np.arange(n)  # t = [0, 1, ..., 251]，对应t-1（i从0开始）
+        raw_weights = np.exp(-lambda_ * t)  # 原始权重：最近一天(t=0)权重=exp(0)=1，最早一天(t=251)权重最小
+        # 步骤3：归一化权重（确保总和为1）
+        normalized_weights = raw_weights / raw_weights.sum()
+        # 将权重添加到DataFrame（注意：权重与原始数据顺序一致，即最早数据对应最小权重，最近数据对应最大权重）
+        df[col] = normalized_weights[::-1]       
+        return df
+        
+    @staticmethod    
     def split_dataframe_by_index(df):
         # 定义匹配英文和中文的正则表达式
         english_pattern = re.compile(r'^[a-zA-Z_]+$')
@@ -178,3 +191,6 @@ class General:
         chinese_df = df[df.index.map(lambda x: bool(chinese_pattern.match(x)))]
      
         return english_df, chinese_df    
+    
+    
+    

@@ -56,12 +56,12 @@ __config__ = {
         "sys_analyser": {
             "plot": True,
             # "benchmark": '000985.XSHG'
-            "benchmark": '000852.XSHG'
+            # "benchmark": '000852.XSHG'
             # "benchmark": '000300.XSHG'
             # "benchmark": '000906.XSHG'   #800
             # "benchmark": "399303.XSHE"
             # "benchmark": "932000.INDX"
-            # "benchmark": "866006.RI"
+            "benchmark": "866006.RI"
         }
     }
 }

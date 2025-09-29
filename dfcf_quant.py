@@ -43,7 +43,7 @@ from tools.riskfolio_func import Riskfolio
 np.random.seed(0)
 
 def main(args):
-    ####make_order ##制作.csv文件
+    ####make_order ##制作扫单.csv文件
     if args.task=='make_order': 
         print('make_order')
         
@@ -55,9 +55,9 @@ def main(args):
         res.to_csv('DFCF_csv/input/test.order2.csv',index=False)
         xx=1
 
-    ####!!!!!!!rq_wpg_make_pms_csv3 根据任意池子+任意因子等权生成pms目标持仓清单
-    if args.task=='rq_wpg_make_pms_csv3':  
-        print('rq_wpg_make_pms_csv3...')
+    ####!!!!!!!target_pos 根据任意池子+任意因子等权生成dfcf目标持仓
+    if args.task=='target_pos':  
+        print('target_pos...')
         
         weights=[]
         for id in args.ids:
@@ -116,59 +116,134 @@ def main(args):
         res=res[res['买卖数量']!=0] ##去掉价格过高，分配不到100股的票
         money=sum(res['买卖价格']*res['买卖数量'])
         
-        buy_money=res[res['买卖方向']=='买入']
-        if len(buy_money)!=0:
-            buy_money=sum(buy_money['买卖价格']*buy_money['买卖数量'])
+        buy=res[res['买卖方向']=='买入']
+        if len(buy)!=0:
+            buy_money=sum(buy['买卖价格']*buy['买卖数量'])
         else:
             buy_money=0
             
-        sell_money=res[res['买卖方向']=='卖出']
-        if len(sell_money)!=0:
-            sell_money=sum(buy_money['买卖价格']*buy_money['买卖数量'])
+        sell=res[res['买卖方向']=='卖出']
+        if len(sell)!=0:
+            sell_money=sum(sell['买卖价格']*sell['买卖数量'])
         else:
             sell_money=0        
         print('总数:',money)
         print('买入:',buy_money)
+        print('买入笔数:',len(buy))
         print('卖出:',sell_money)
+        print('卖出笔数:',len(sell))
         
         
-        acc='仿真篮子'  ##文件名和账户名有关联
         now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
-        path=f'./DFCF_csv/篮子/{acc}_{now}.csv'  
+        path=f'./DFCF_csv/篮子/目标篮子_{now}.csv'  
         
-        res=res[['证券代码', '买卖方向', '买卖数量']]  
-        res.columns=['代码', '交易方向', '数量']      
+        res=res[['证券代码', '买卖方向', '买卖数量','买卖价格']]  
+        res.columns=['代码', '交易方向', '数量','委托价格']      
         res['代码']=res['代码'].apply(lambda x:x.split('.')[0])
         res['交易方向']=res['交易方向'].apply(lambda x:1 if x=='买入' else 2)
         res['权重']=np.nan
-        res['委托价格']=np.nan
+        # res['委托价格']=np.nan
         res['基准价格']=np.nan
         
         res.to_csv(path,index=False)
         print(f'save to {path}')
         
+    ####!!!!!!!adjust_pos 根据持仓篮子+目标篮子，生成调仓篮子
+    if args.task=='adjust_pos':  
+        print('adjust_pos...')
+        
+        hold_pos=pd.read_csv(args.hold_pos,encoding='gbk',dtype=str) ##现有持仓
+        target_pos=pd.read_csv(args.target_pos,dtype=str) ##目标持仓
+        
+        hold_pos['代码']=hold_pos['symbol'].apply(lambda x:x.split('.')[-1])
+        df=pd.merge(hold_pos[['代码','availableNow','lastPrice','marketValue','fpnl']],
+                    target_pos[['代码','数量','委托价格']],on='代码',how='outer')
+        df['lastPrice'].fillna(df['委托价格'], inplace=True)
+        del df['委托价格']
+        df.columns=['代码', '现有持仓', '价格', '市值', '盈亏', '目标持仓']
+        df=df.fillna(0)
+        df['调整股数']=df['目标持仓'].apply(int)-df['现有持仓'].apply(int)
+        df=df.sort_values('调整股数',ascending=True)
+        df['调整金额']=df['调整股数'].apply(float)*df['价格'].apply(float)
+        def func1(row):##保留所需行
+            if abs(row['调整金额'])>args.adjust_threshold: #调整幅度太小的，没有免5不划算，其它保留
+                return True
+            else:
+                return False
+        df['是否保留']=df.apply(func1,axis=1)
+            
+        res=df[df['是否保留']==True]
+        
+        def func2(row): ##处理科创板
+            if row['代码'].startswith('688') and row['调整股数']>0 and row['调整股数']<200: ##科创板
+                return 200
+            else:
+                return row['调整股数']
+        res['调整股数']=res.apply(func2,axis=1)
+        
+        money=res['调整金额'].apply(abs).sum()
+        buy=res[res['调整金额']>0]
+        if len(buy)!=0:
+            buy_money=buy['调整金额'].sum()
+        else:
+            buy_money=0
+            
+        sell=res[res['调整金额']<0]
+        if len(sell)!=0:
+            sell_money=sell['调整金额'].sum()
+        else:
+            sell_money=0        
+        print('总数:',money)
+        print('买入:',buy_money)
+        print('买入笔数:',len(buy))
+        print('卖出:',sell_money)
+        print('卖出笔数:',len(sell))
+        
+        
+        res['交易方向']=res['调整股数'].apply(lambda x:1 if x>0 else 2)
+        res['数量']=res['调整股数'].apply(abs)
+        res=res[['代码', '交易方向', '数量']]  
+        res['权重']=np.nan
+        res['委托价格']=np.nan
+        res['基准价格']=np.nan
+        
+        
+        
+        
+        
+        
+        res=res.reset_index(drop=True)
+        path=f'./DFCF_csv/篮子/调仓篮子_{args.et}.csv'  
+        res.to_csv(path,index=False)
+        print(f'save to {path}')
         
 if __name__ == '__main__':
+    ####入参
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
 
     # args.task='make_order'
     
+    args.task='adjust_pos'
+    args.hold_pos='DFCF_csv/持仓/持仓篮子_25-9-29.csv'
+    args.target_pos='DFCF_csv/篮子/目标篮子_2025-09-26.csv'
+    args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
+    args.et='2025-09-26'
     
-    args.task='rq_wpg_make_pms_csv3'     ##liq
-    args.ids=[
-              '000852.XSHG',
-              '932000.INDX',
-              # '866006.RI',
-              ]
+    # args.task='target_pos'     
+    # args.ids=[
+    #           '000852.XSHG',
+    #           '932000.INDX',
+    #           # '866006.RI',
+    #           ]
     
-    args.factors=[
-        # 'size',
-        'beta',
-        'liquidity',
-        ]
-    args.et=pd.to_datetime('20250924')
-    args.money=162e4
+    # args.factors=[
+    #     # 'size',
+    #     'beta',
+    #     'liquidity',
+    #     ]
+    # args.et=pd.to_datetime('20250926')
+    # args.money=162e4
     
     main(args)
     

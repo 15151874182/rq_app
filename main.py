@@ -374,27 +374,78 @@ def main(args):
             #     top_n=1550
             
             
-            ##size复现
-            shares=rqdatac.get_shares(list(weights['order_book_id']), start_date=date, end_date=date, fields=None, market='cn', expect_df=True)['total_a'] 
-            shares.index = shares.index.get_level_values(0)
-
-            close=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
-                      start_date=date, 
-                      end_date=date, 
+            ##beta复现
+            date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
+            date_252=rqdatac.get_previous_trading_date(date,n=252,market='cn')
+            wpg=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
+                      start_date=date_252, 
+                      end_date=date_1, 
                       frequency='1d', 
-                      fields=None, adjust_type='none', skip_suspended =False, market='cn',  ##要不复权的价格！！！
-                      expect_df=True,time_slice=None)['close']
-            close.index = close.index.get_level_values(0)
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
+            hs300=rqdatac.get_price(order_book_ids='000300.XSHG', 
+                      start_date=date_252, 
+                      end_date=date_1, 
+                      frequency='1d', 
+                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                      expect_df=True,time_slice=None)
             
-            df=weights.set_index('order_book_id')
+               
+            hs300['return']=hs300['close']/hs300['close'].shift(1)-1
+            hs300=hs300.bfill()
+     
+             # wpg['return']=wpg['close']/wpg['prev_close']-1
+             # hs300['return']=hs300['close']/hs300['prev_close']-1
+     
+            hs300.index = hs300.index.get_level_values(1)
+     
+            import statsmodels.formula.api as smf
+            def func(df,hs300):
+                df.index = df.index.get_level_values(1)
+                df['return']=df['close']/df['close'].shift(1)-1
+                df=df.bfill()
+                res=df[['return']].join(hs300[['return']], lsuffix='_wpg', rsuffix='_hs300')
+                
+                # 公式接口：y ~ x（因变量~自变量，默认添加截距项）
+                model_ols = smf.ols(formula='return_wpg ~ return_hs300', data=res)
+                result_ols = model_ols.fit()
+                beta=result_ols.params.iloc[-1]
+                
+                # res=General.generate_decay_weight(res)
+                # model_wls  = smf.wls(formula='return_wpg ~ return_hs300', data=res, weights=res['weight'])
+                # result_wls = model_wls.fit()
+                # beta=result_wls.params.iloc[-1]
+                
+                return beta
             
-            shares = shares.to_frame(name='total_share') 
-            close = close.to_frame(name='close') 
-            df=df.join(shares).join(close)
+            df=wpg.groupby(level=0).apply(func,hs300)
+            df=df.sort_values(ascending=False)
             
-            df['market_value']=df['close']*df['total_share'] ##总市值
-            df=df.sort_values('market_value',ascending=True)
+            
+            
             chosen2=set(df.index[:top_n])
+            
+            # ##size复现
+            # shares=rqdatac.get_shares(list(weights['order_book_id']), start_date=date, end_date=date, fields=None, market='cn', expect_df=True)['total_a'] 
+            # shares.index = shares.index.get_level_values(0)
+
+            # close=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
+            #           start_date=date, 
+            #           end_date=date, 
+            #           frequency='1d', 
+            #           fields=None, adjust_type='none', skip_suspended =False, market='cn',  ##要不复权的价格！！！
+            #           expect_df=True,time_slice=None)['close']
+            # close.index = close.index.get_level_values(0)
+            
+            # df=weights.set_index('order_book_id')
+            
+            # shares = shares.to_frame(name='total_share') 
+            # close = close.to_frame(name='close') 
+            # df=df.join(shares).join(close)
+            
+            # df['market_value']=df['close']*df['total_share'] ##总市值
+            # df=df.sort_values('market_value',ascending=True)
+            # chosen2=set(df.index[:top_n])
             
             ##liquidity复现
             # turnover=rqdatac.get_turnover_rate(list(weights['order_book_id']), 
@@ -1150,6 +1201,73 @@ def main(args):
         #            'MACD_pct_change', 'MACD_flag']].iloc[-30:].to_csv(args.file)
 
 
+    ####compare_rq_cty_beta_factor 对比自己复现和米筐的beta因子排序是否一致
+    if args.task=='compare_rq_cty_beta_factor':  
+        print('compare_rq_cty_beta_factor...')
+        
+        df=rqdatac.index_weights(order_book_id='866006.RI', date=args.et)
+        
+        date_1=rqdatac.get_previous_trading_date(args.et,n=1,market='cn')
+        date_252=rqdatac.get_previous_trading_date(args.et,n=252,market='cn')
+        wpg=rqdatac.get_price(order_book_ids=list(df.index), 
+                  start_date=date_252, 
+                  end_date=date_1, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        hs300=rqdatac.get_price(order_book_ids='000300.XSHG', 
+                  start_date=date_252, 
+                  end_date=date_1, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        
+
+        hs300['return']=hs300['close']/hs300['close'].shift(1)-1
+        hs300=hs300.bfill()
+        
+        # wpg['return']=wpg['close']/wpg['prev_close']-1
+        # hs300['return']=hs300['close']/hs300['prev_close']-1
+        
+        hs300.index = hs300.index.get_level_values(1)
+        
+        import statsmodels.formula.api as smf
+        def func(df,hs300):
+            df.index = df.index.get_level_values(1)
+            df['return']=df['close']/df['close'].shift(1)-1
+            df=df.bfill()
+            res=df[['return']].join(hs300[['return']], lsuffix='_wpg', rsuffix='_hs300')
+            
+            # 公式接口：y ~ x（因变量~自变量，默认添加截距项）
+            # model_ols = smf.ols(formula='return_wpg ~ return_hs300', data=res)
+            # result_ols = model_ols.fit()
+            # beta=result_ols.params.iloc[-1]
+            
+            res=General.generate_decay_weight(res)
+            model_wls  = smf.wls(formula='return_wpg ~ return_hs300', data=res, weights=res['weight'])
+            result_wls = model_wls.fit()
+            beta=result_wls.params.iloc[-1]
+            
+            return beta
+        
+        res=wpg.groupby(level=0).apply(func,hs300)
+        res=res.sort_values(ascending=False)
+        
+        
+        factor=rqdatac.get_factor_exposure(list(df.index), 
+                                           args.et, args.et, factors = ['beta'],
+                                           industry_mapping='citics_2019', model = 'v2')
+        
+        beta_sort=factor.sort_values('beta',ascending=False)
+        beta_sort.index = beta_sort.index.get_level_values(1)
+        print(res.index==beta_sort.index)
+        
+        n=100
+        s1=set(res.index[:n])
+        s2=set(beta_sort.index[:n])
+        print(len(s1 & s2))
+        xx=1
+        
     ####compare_rq_cty_size_factor 对比自己复现和米筐的size因子排序是否一致
     if args.task=='compare_rq_cty_size_factor':  
         print('compare_rq_cty_size_factor...')
@@ -1462,7 +1580,7 @@ def main(args):
             res2=df[['id','name']]
             res2.to_excel(writer, sheet_name='股票名清单', index=False)      
         
-    ####rq_wpg_adjust_ATX 根据ATX的实时监控.xlsx和米筐的微盘股目标仓位，生成csv，用于ATX 调仓
+    ####！！！！rq_wpg_adjust_ATX 根据ATX的实时监控.xlsx和米筐的微盘股目标仓位，生成csv，用于ATX 调仓
     if args.task=='rq_wpg_adjust_ATX':  
         print('rq_wpg_adjust_ATX...')
         
@@ -4031,13 +4149,13 @@ if __name__ == '__main__':
     
     args.task='factor_study2'
     args.st='20250701' ##全周期，有数据的第一天
-    args.et='20250923'    
+    args.et='20250925'    
     # args.universe='whole_market'
     # args.universe='000300.XSHG'   ##300
     # args.universe='000905.XSHG'   ##500
     # args.universe='000906.XSHG'   ##800
-    args.universe='000852.XSHG' ##1000
-    # args.universe='399303.XSHE' ##国证2000
+    # args.universe='000852.XSHG' ##1000
+    args.universe='399303.XSHE' ##国证2000
     
     
     # args.st='20070205'   ##牛市1，有数据的第一天
@@ -4132,14 +4250,14 @@ if __name__ == '__main__':
     
     # args.task='make_backtest_file0'
     # args.ids=[
-    #           '000852.XSHG',
-    #           '932000.INDX',
-    #           # '866006.RI',
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           '866006.RI',
     #           ]
     
     # args.factors=[
-    #     'size',
-    #     # 'beta',
+    #     # 'size',
+    #     'beta',
     #     # 'liquidity',
     #     ]
     # # args.st='20250819'
@@ -4158,8 +4276,8 @@ if __name__ == '__main__':
     
     args.factors=[
         # 'size',
-        # 'beta',
-        'liquidity',
+        'beta',
+        # 'liquidity',
         ]
     # args.st='20250819'
     args.st='20230901'
@@ -4460,6 +4578,9 @@ if __name__ == '__main__':
     # args.task='download'
     # args.st='20100101'
     # args.et='20250630'
+    
+    # args.task='compare_rq_cty_beta_factor'
+    # args.et=20250915
     
     # args.task='compare_rq_cty_size_factor'
     # args.et=20250915
