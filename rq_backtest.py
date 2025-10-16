@@ -29,7 +29,7 @@ __config__ = {
             "STOCK": 2e7,
         },
         "start_date": "20230901",
-        "end_date": "20250919",
+        "end_date": "20250915",
         # 是否开启期货历史交易参数进行回测
         # "futures_time_series_trading_parameters": True,
     },
@@ -56,12 +56,12 @@ __config__ = {
         "sys_analyser": {
             "plot": True,
             # "benchmark": '000985.XSHG'
-            # "benchmark": '000852.XSHG'
+            "benchmark": '000852.XSHG'
             # "benchmark": '000300.XSHG'
             # "benchmark": '000906.XSHG'   #800
             # "benchmark": "399303.XSHE"
             # "benchmark": "932000.INDX"
-            "benchmark": "866006.RI"
+            # "benchmark": "866006.RI"
         }
     }
 }

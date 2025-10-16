@@ -207,15 +207,20 @@ def main(args):
         res['委托价格']=np.nan
         res['基准价格']=np.nan
         
-        
-        
-        
-        
-        
         res=res.reset_index(drop=True)
         path=f'./DFCF_csv/篮子/调仓篮子_{args.et}.csv'  
         res.to_csv(path,index=False)
         print(f'save to {path}')
+
+
+
+    ####!!!!!!!basis_detect 基差监测
+    if args.task=='basis_detect':  
+        print('basis_detect...')
+        basis=rqdatac.futures.get_basis(order_book_ids=args.id, 
+                                        start_date=args.st,end_date=args.et,
+                                        fields=None,frequency='1d')
+        basis['basis'].plot()
         
 if __name__ == '__main__':
     ####入参
@@ -224,11 +229,16 @@ if __name__ == '__main__':
 
     # args.task='make_order'
     
-    args.task='adjust_pos'
-    args.hold_pos='DFCF_csv/持仓/持仓篮子_25-9-29.csv'
-    args.target_pos='DFCF_csv/篮子/目标篮子_2025-09-26.csv'
-    args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
-    args.et='2025-09-26'
+    args.task='basis_detect'
+    args.id='IM2603'
+    args.st=20250101
+    args.et=20251009
+    
+    # args.task='adjust_pos'
+    # args.hold_pos='DFCF_csv/持仓/持仓篮子_25-9-29.csv'
+    # args.target_pos='DFCF_csv/篮子/目标篮子_2025-09-26.csv'
+    # args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
+    # args.et='2025-09-26'
     
     # args.task='target_pos'     
     # args.ids=[

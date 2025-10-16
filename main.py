@@ -267,8 +267,9 @@ def main(args):
         print(wind.difference(rq)) 
         xx=1
 
-    ####!!!!!!!!!make_backtest_file0 制作任意池子，任意因子组合的回测所需文件
-    if args.task=='make_backtest_file0':     
+        
+    ####!!!!!!!!!make_backtest_file1 测试因子打分回测所需文件
+    if args.task=='make_backtest_file1':     
         inputs=[]
         st=args.st
         et=args.et
@@ -286,38 +287,126 @@ def main(args):
             weights=weights.reset_index()
             weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
 
+            exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
+                                               date_1, date_1, factors = list(args.factors.keys()),
+                                               industry_mapping='citics_2019', model = 'v2')
+            # 计算综合评分（值越高越符合目标）
+            exposure['score']=0
+            for factor in list(args.factors.keys()):
+                exposure['score']+=exposure[factor] *args.factors[factor]
+                
+            exposure=exposure.sort_values('score',ascending=False)
+            chosen=set(exposure.iloc[:args.top_n].index.get_level_values(1))
+            weights=weights[weights['order_book_id'].isin(chosen)]
+            number=[]
+            # for id in args.ids:   ##成分股占比监测
+            #     part=rqdatac.index_weights(order_book_id=id, date=date_1)
+            #     n=len(weights[weights['order_book_id'].isin(list(part.index))])
+            #     number.append([id,n])
+            # print(number)
+            weights.columns=['TICKER','TARGET_WEIGHT']
+            weights['TRADE_DT']=date.strftime('%Y%m%d')
+            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
+            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
+            weights['TARGET_WEIGHT']=1/len(weights)
+            inputs.append(weights)
+        inputs=pd.concat(inputs,axis=0)
+        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
+            inputs.to_excel(writer, sheet_name='', index=False)  
+            print(f'save to {args.file}')        
+        
+        x=a
+        
+    ####make_backtest_file2 测试因子正交化回测所需文件
+    if args.task=='make_backtest_file2':     
+        import statsmodels.api as sm
+        inputs=[]
+        st=args.st
+        et=args.et
+        dates=rqdatac.get_trading_dates(st, et, market='cn')
+        len_chosen=[]
+        cols_risk_factor=[
+            # 市场风险因子
+            'beta', 
+            'residual_volatility',
+        
+            # 价值/基本面因子
+            'book_to_price', 
+            'dividend_yield', 
+            'earnings_yield',
+        
+            # 质量/盈利因子
+            'earnings_quality', 
+            'profitability', 
+            'earnings_variability',
+        
+            # 增长/投资因子
+            'growth', 
+            'investment_quality',
+        
+            # 动量与反转因子
+            'momentum', 
+            'longterm_reversal',
+        
+            # 流动性/规模因子
+            'size', 
+            'mid_cap', 
+            'liquidity',
+        
+            # 杠杆因子
+            'leverage'
+        ]
+        for date in tqdm(dates[::args.f]): 
+            date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
+            date_n=rqdatac.get_previous_trading_date(date,n=args.days,market='cn')
+            
+            weights=[]
+            for id in args.ids:
+                part=rqdatac.index_weights(order_book_id=id, date=date_1)
+                weights.append(part)
+            weights=pd.concat(weights)
+            weights=weights.reset_index()
+            weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
+
             n=len(args.factors)
             chosen=set(weights['order_book_id'])
-            if n==1:  ##1000+2000,size,liq,beta,交集100
-                top_n=100
+            # if n==1:  ##1000,liq,beta,交集100
+            #     top_n=100
+            # elif n==2:
+            #     top_n=450
+            # elif n==3:
+            #     top_n=1250
+            if n==1:  ##1000,liq,交集300
+                top_n=300
             elif n==2:
-                top_n=800
+                top_n=450
             elif n==3:
                 top_n=1250
-            # if n==1:  ##1000+2000,size,liq,beta,交集200
-            #     top_n=200
-            # elif n==2:
-            #     top_n=1000
-            # elif n==3:
-            #     top_n=1450
-            # if n==1:  ##1000+2000,size,liq,beta,交集300
-            #     top_n=300
-            # elif n==2:
-            #     top_n=1200
-            # elif n==3:
-            #     top_n=1550
             for factor in args.factors:
                 exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
-                                                   date_1, date_1, factors = factor,
+                                                   date_1, date_1, factors = cols_risk_factor,
                                                    industry_mapping='citics_2019', model = 'v2')
                 if factor=='size' or factor=='liquidity':
                     sort=exposure.sort_values(factor,ascending=True)
                 elif factor=='beta':
                     sort=exposure.sort_values(factor,ascending=False)
                 sort=sort.reset_index()
+                
+                X_list=cols_risk_factor.copy()
+                X_list.remove(factor)
+                # X_list=['momentum']
+                X_list=['beta','liquidity','momentum']
+                X = sort[X_list]
+                X = sm.add_constant(X)  # 添加截距项
+                y = sort[factor]  # 因变量：Size因子暴露
+                # 线性回归：Y = α + β1*BP + β2*Momentum + β3*Volatility + ε
+                model = sm.OLS(y, X).fit()
+                sort['residual'] = model.resid  # 残差ε：纯Size暴露（越小越好）
+                sort = sort.sort_values('residual')  # 残差越小，纯Size暴露越显著
+                sort3=sort.head(100)
                 chosen2=set(sort['order_book_id'].iloc[:top_n])
                 chosen=chosen & chosen2
-                
+            print(len(chosen))
             weights=weights[weights['order_book_id'].isin(chosen)]
             
             weights.columns=['TICKER','TARGET_WEIGHT']
@@ -333,8 +422,8 @@ def main(args):
         
         x=a
         
-    ####!!!!!!!!!make_backtest_file00 自制因子
-    if args.task=='make_backtest_file00':     
+    ####make_backtest_file3 自制因子
+    if args.task=='make_backtest_file3':     
         inputs=[]
         st=args.st
         et=args.et
@@ -476,277 +565,9 @@ def main(args):
         x=a
 
         
-    ####make_backtest_file 制作回测所需文件
-    if args.task=='make_backtest_file':    
-        cols_risk_factor=[
-            # 市场风险因子
-            'beta', 
-            'residual_volatility',
         
-            # 价值/基本面因子
-            'book_to_price', 
-            'dividend_yield', 
-            'earnings_yield',
-        
-            # 质量/盈利因子
-            'earnings_quality', 
-            'profitability', 
-            'earnings_variability',
-        
-            # 增长/投资因子
-            'growth', 
-            'investment_quality',
-        
-            # 动量与反转因子
-            'momentum', 
-            'longterm_reversal',
-        
-            # 流动性/规模因子
-            'size', 
-            'mid_cap', 
-            'liquidity',
-        
-            # 杠杆因子
-            'leverage'
-        ]
-        
-        cols_industry_factor=[
-            # 顺周期行业（经济敏感型）
-            '煤炭', '石油石化',         # 上游资源
-            '有色金属', '钢铁',         # 金属材料
-            '基础化工', '建材',         # 中游原材料
-            '机械', '建筑',            # 基建与设备制造
-            '房地产', '汽车', '家电',   # 下游消费与地产
-        
-            # 高股息/防御型行业（弱周期）
-            '银行', '非银行金融',       # 金融
-            '电力及公用事业', '交通运输', # 公共事业
-        
-            # 消费类行业（需求稳定型）
-            '食品饮料', '农林牧渔', '医药',        # 必需消费
-            '商贸零售', '消费者服务', '纺织服装', '轻工制造',  # 可选消费
-        
-            # 科技成长类行业（创新驱动型）
-            '计算机', '通信', '电子', '电力设备及新能源', '传媒',
-        
-            # 其他特殊类别
-            '国防军工',               # 政策驱动型
-            '综合', '综合金融'         # 多元化业务
-        ]        
-        
-        # dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
-        # inputs=[] ##存每天的股票清单
-        # for date in tqdm(dates):
-        #     st=rqdatac.get_previous_trading_date(date,n=5,market='cn')
-        #     et=rqdatac.get_previous_trading_date(date,n=1,market='cn')
-       
-        #     implicit=rqdatac.get_factor_return(st, et, 
-        #                       factors= None, universe='whole_market',
-        #                       method='implicit',industry_mapping='citics_2019', model = 'v2')
-        #     explicit=rqdatac.get_factor_return(st, et, 
-        #                       factors= None, universe='whole_market',
-        #                       method='explicit',industry_mapping='citics_2019', model = 'v2')
-        
-        #     ##要用显式因子收益率（多空组合算出来的）+行业因子收益率（显式没有这个），拼起来
-        #     factor_return=pd.concat([explicit[cols_risk_factor],implicit[cols_industry_factor]],axis=1)
-            
-        #     ##对因子按天远近加权
-        #     daily_weights=General.sum_normalize([i for i in range(1,len(factor_return)+1)])
-        #     daily_weights = pd.Series(daily_weights, index=factor_return.index)
-        #     factor_return_weighted = factor_return.multiply(daily_weights, axis=0)
-        
-        # ########factor_return_map画图
-        # # factor_return=pd.concat([factor_return[cols_risk_factor],
-        # #                         factor_return[cols_industry_factor]],axis=1)
-        
-        # # # 创建一个 3 行 2 列的画布
-        # # fig, axes = plt.subplots(3, 2, figsize=(30, 30))
-        # # #解决中文或者是负号无法显示的情况
-        # # mpl.rcParams["font.sans-serif"] = ["SimHei"]
-        # # mpl.rcParams['axes.unicode_minus'] = False
-        # # plt.rcParams['figure.dpi'] = 300
-        # # plt.tight_layout(
-        # #     pad=10.0,        # 主画布与子图之间的边距
-        # #     w_pad=10.0,      # 子图之间的水平间距
-        # #     h_pad=10.0       # 子图之间的垂直间距
-        # # )
-        
-        # # for id,date in enumerate(factor_return.index):
-        # #     daily_data=factor_return.loc[date]
-        # #     risk_part=abs(daily_data[cols_risk_factor]).rank()
-        # #     industry_part=daily_data[cols_industry_factor].rank()
-        # #     daily_data = pd.concat([risk_part, industry_part])
-            
-        # #     factor_return_map = []
-        # #     for risk in cols_risk_factor:
-        # #         for industry in cols_industry_factor:
-        # #             factor_return_map.append(abs(daily_data[risk]) + daily_data[industry])
-                    
-        # #     factor_return_map=General.normalize_list(factor_return_map, lower_bound=0, upper_bound=100)
-            
-        # #     factor_return_map=np.array(factor_return_map).reshape(len(cols_risk_factor),len(cols_industry_factor))
-        # #     factor_return_map=pd.DataFrame(factor_return_map,index=cols_risk_factor,columns=cols_industry_factor)
-        # #     factor_return_map.index.name=''
-        # #     factor_return_map.columns.name=''
-        # #     x,y=divmod(id,2)
-        # #     sns.heatmap(factor_return_map, annot=False, cmap='coolwarm', ax=axes[x, y])
-        # #     axes[x, y].set_title(f'{date}')
-        
-        
-        # ########factor_return cumsum diagram
-        # # factor_return=factor_return.cumsum()
-        # # cols=factor_return.columns
-        # # Plot.plot_res3(factor_return,'',cols = cols,start_time = factor_return.index[0],
-        # #                                 end_time=factor_return.index[-1],
-        # #                                 days = None,
-        # #                                 maxmin=False)
-        
-            ########factor_return sharp 筛选策略
-        #     res=factor_return_weighted.describe()
-        #     res=res.T
-        #     res['sharp']=res['mean']/res['std'] ##计算因子收益率sharp
-        #     res['abs_sharp']=abs(res['sharp']) ##非常负的风险因子收益率也是一种市场风格偏向，要看绝对值
-        #     risk_part,industry_part=General.split_dataframe_by_index(res)
-            
-            
-        #     risk_part=risk_part.sort_values(['abs_sharp'],ascending=False)
-        #     risk_part=risk_part[risk_part['abs_sharp']>0.5] 
-        #     industry_part=industry_part[industry_part['sharp']>0] 
-        #     industry_part=industry_part.sort_values(['sharp'],ascending=False)
-            
-            
-        #     factor_return_array = []
-        #     for risk in risk_part.index:
-        #         for industry in industry_part.index:
-        #             x1,y1=risk_part['sharp'][risk],risk_part['abs_sharp'][risk]
-        #             x2=industry_part['sharp'][industry]
-        #             factor_return_array.append([risk,industry,x1,y1,x2,y1+x2])
-        #     factor_return_array=pd.DataFrame(factor_return_array,columns = ['risk', 'industry', 'risk_sharp', 'risk_abs_sharp', 'industry_sharp', 'sum_sharp'])
-        #     risk_industry_sharp=factor_return_array.sort_values(['sum_sharp'],ascending=False)
-            
-        #     stock_industry_dict={}
-        #     stock_pool_list=[]
-        #     for industry in industry_part.index:
-        #         stocks=rqdatac.get_industry(industry=industry, source='citics_2019', date=None, market='cn')
-        #         stock_pool_list+=stocks
-        #         for stock in stocks:
-        #             stock_industry_dict[stock]=industry
-        #     exposures=rqdatac.get_factor_exposure(stock_pool_list,st,et,factors=None,industry_mapping='citics_2019', model = 'v2')
-            
-        #     group = exposures.groupby(level=1)
-        #     stocks_score=[]
-        #     for id,item in group:
-        #         item=item[risk_part.index]
-        #         item_weighted = item.multiply(daily_weights, axis=0)
-        #         exposure=item_weighted.sum()
-        #         industry=stock_industry_dict[id] ##查找该stock对应industry
-        #         info=risk_industry_sharp[risk_industry_sharp['industry']==industry]
-        #         info['exposure']=list(exposure)
-        #         stock_score=sum(info['risk_sharp']*info['exposure']+info['industry_sharp']*abs(info['exposure']))
-        #         stocks_score.append([id,stock_score])
-        #     stocks_score=pd.DataFrame(stocks_score,columns=['id','score'])
-        #     stocks_score=stocks_score.sort_values(['score'],ascending=False)
-        #     stocks_score['name']=stocks_score['id'].apply(lambda id:rqdatac.instruments(id, market='cn').symbol)
-        #     stocks_score=stocks_score.reset_index()
-        #     stocks_score=stocks_score[~stocks_score['name'].str.contains('ST')] ##去掉st的
-        #     stocks_score=stocks_score[stocks_score['score']>0] ##去掉负分的
-        
-        #     select=stocks_score.iloc[:args.k]
-        #     k=len(select)
-        #     print(k)
-        #     if k!=0: ##市场太差，存在筛选是空的
-        #         select['TRADE_DT']=date.strftime('%Y%m%d')
-        #         select['TARGET_WEIGHT']=1/k
-        #         select=select[['TRADE_DT','id','name','TARGET_WEIGHT']]
-        #         select.columns=['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']
-        #         inputs.append(select)
-        #     else:
-        #         select=copy.deepcopy(inputs[-1])
-        #         # select['TARGET_WEIGHT']=0
-        #         select['TRADE_DT']=date.strftime('%Y%m%d')
-        #         inputs.append(select)
-        #     xx=1
-        # inputs=pd.concat(inputs,axis=0)
-        # with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
-        #     inputs.to_excel(writer, sheet_name='', index=False)                  
-                
-            
-        # select['买卖价格']=select['id'].apply(lambda id:rqdatac.get_price(order_book_ids=id, 
-        #           start_date=date, 
-        #           end_date=date, 
-        #           frequency='1d', 
-        #           fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-        #           expect_df=True,time_slice=None)['close'].iloc[0])
-        # money=1000e4
-        # each=money//len(select)
-        # select['买卖数量']=select['买卖价格'].apply(lambda price:int(each//(price*100)*100))
-        # select['买卖日期']=date
-        # select['买卖方向']='买入'
-        # select['证券代码']=list(select['id'].apply(lambda id:rqdatac.id_convert(id,to='normal')))
-        
-        # res=select[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
-        
-        # acc='acc1'  ##文件名和账户名有关联
-        # now = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")##文件名和时间有关联
-        # path=f'./trade_log/{acc}_{now}.xlsx'  
-        # with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
-        #     res.to_excel(writer, sheet_name='导入数据区', index=False)      
-        #     res3=select[['id','name']]
-        #     res3.to_excel(writer, sheet_name='股票名清单', index=False)      
-
-        inputs=[]
-        st=args.st
-        et=args.et
-        dates=rqdatac.get_trading_dates(st, et, market='cn')
-        # is_suspendeds=[]
-        for date in tqdm(dates[::args.f]): ##args.f是回测频率
-            weights=rqdatac.index_weights(order_book_id='866006.RI', date=date)
-            weights=weights.reset_index()
-            weights.columns=['TICKER','TARGET_WEIGHT']
-            ####组合优化
-            new_weight=portfolio_optimize(order_book_ids=list(weights['TICKER']), 
-                                date=date, 
-                                # objective= MinVariance(), 
-                                # objective= MeanVariance(window=252), 
-                                objective= MaxSharpeRatio(window=252), 
-                                # bnds={'*': (0.002, 0.02)}, 
-                                cons=None, 
-                                benchmark=None, 
-                                cov_model=CovModel.FACTOR_MODEL_DAILY)
-            new_weight=new_weight.reset_index()
-            new_weight.columns=['TICKER','new_weight']            
-            merged = pd.merge(weights, new_weight, on='TICKER')
-            weights['TARGET_WEIGHT'] = merged['new_weight']
-
-            weights['TRADE_DT']=date.strftime('%Y%m%d')
-            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
-            
-            ## 等股
-            # weights['close']=list(rqdatac.get_price(order_book_ids=list(weights['TICKER']), 
-            #           start_date=date, 
-            #           end_date=date, 
-            #           frequency='1d', 
-            #           fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-            #           expect_df=True,time_slice=None)['close'])
-            # weights['TARGET_WEIGHT']=weights['close']/sum(weights['close'])
-            
-            
-            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
-            # is_suspendeds+=list(weights['TICKER'])
-            inputs.append(weights)
-        
-        inputs=pd.concat(inputs,axis=0)
-        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
-            inputs.to_excel(writer, sheet_name='', index=False)  
-            print(f'save to {args.file}')
-            
-        # is_suspendeds_df=pd.DataFrame(set(is_suspendeds),columns=['id'])
-        # is_suspended_df=rqdatac.is_suspended(list(is_suspendeds_df['id']), start_date=st,end_date=et)
-        # is_suspended_df.to_csv('config/is_suspended_df.csv') 
-        # is_suspended_df=pd.read_csv(r'config/is_suspended_df.csv',index_col=0,parse_dates=True)
-
-    ####make_backtest_file2 制作微盘股+macd回测所需文件
-    if args.task=='make_backtest_file2':     
+    ####make_backtest_file4 制作微盘股+macd回测所需文件
+    if args.task=='make_backtest_file4':     
         df2=pd.read_excel('data/米筐微盘股等权日频.xlsx',dtype=str)
 
         df=rqdatac.get_price(order_book_ids='866006.RI', 
@@ -821,8 +642,8 @@ def main(args):
             print(f'save to {args.file}')        
         xx=a
         
-    ####make_backtest_file3 制作微盘股1、4、12月空仓，用红利股替代的回测所需文件
-    if args.task=='make_backtest_file3':     
+    ####make_backtest_file5 制作微盘股1、4、12月空仓，用红利股替代的回测所需文件
+    if args.task=='make_backtest_file5':     
         inputs=[]
         st=args.st
         et=args.et
@@ -847,195 +668,9 @@ def main(args):
             print(f'save to {args.file}')       
                  
             
-    ####make_backtest_file5 制作微盘股增强的回测所需文件
-    if args.task=='make_backtest_file5':     
-        inputs=[]
-        st=args.st
-        et=args.et
-        dates=rqdatac.get_trading_dates(st, et, market='cn')
-        for date in tqdm(dates[::args.f]): 
-            date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
-            date_n=rqdatac.get_previous_trading_date(date,n=args.days,market='cn')
-
-            weights=rqdatac.index_weights(order_book_id=args.id, date=date_1)
-            weights=weights.reset_index()
-            
-            factor=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
-                                               date_n, date_1, factors = args.factor,
-                                               industry_mapping='citics_2019', model = 'v2')
-            
-            factor=factor.reset_index()
-            factor=factor.groupby('order_book_id')[args.factor].mean()
-            factor=factor.to_frame()
-            factor=factor.sort_values([args.factor],ascending=args.ascending)
-            factor=factor.reset_index()
-            
-            chosen=list(factor.iloc[:args.n]['order_book_id'])
-            weights=weights[weights['order_book_id'].isin(chosen)]
-            
-            weights.columns=['TICKER','TARGET_WEIGHT']
-            weights['TRADE_DT']=date.strftime('%Y%m%d')
-            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
-            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
-            weights['TARGET_WEIGHT']=1/len(weights)
-            inputs.append(weights)
-        inputs=pd.concat(inputs,axis=0)
-        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
-            inputs.to_excel(writer, sheet_name='', index=False)  
-            print(f'save to {args.file}')  
-            
-
         
-    ####yz_factor_analysis 制作wind预增指数因子分析
-    if args.task=='yz_factor_analysis':     
-        ress=[]
-        # for date in tqdm(['20250819']): 
-        # for date in tqdm(['20250801','20250808','20250815']): 
-        for date in tqdm(['20250801','20250804','20250805',
-                          '20250806','20250807','20250808',
-                          '20250811','20250812','20250813',
-                          '20250814','20250815','20250818','20250819']): 
-            
-            df=pd.read_excel(f'data/Growth Research/8841090.WI-成分及权重-{date}.xlsx')
-            weights=df['代码'].apply(lambda x:rqdatac.id_convert(x)).to_frame()
-            
-            factor=rqdatac.get_factor_exposure(list(weights['代码']), 
-                                               date, date, factors = None,
-                                               industry_mapping='citics_2019', model = 'v2')
-            
-            res=factor.mean()
-            ress.append([date,res])
-        x=a
-        
-    ####make_backtest_file7 制作wind预增指数回测所需文件
-    if args.task=='make_backtest_file7':     
-        inputs=[]
-        # for date in tqdm(['20250801','20250808','20250815']): 
-        root='data/yz_index'
-        fs=os.listdir(root)
-        for f in tqdm(fs):
-            date=f[11:21].replace('-','')
-            if int(date[:4])<=2020:
-                continue
-            df=pd.read_csv(os.path.join(root,f))
-            
-            weights=df['id'].apply(lambda x:rqdatac.id_convert(x)).to_frame()
-            weights=weights[~weights['id'].str.contains('BJSE')]
-            
-            weights['TARGET_WEIGHT']=1/len(weights)
-
-            weights.columns=['TICKER','TARGET_WEIGHT']
-            weights['TRADE_DT']=date
-            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
-            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
-            inputs.append(weights)
-        inputs=pd.concat(inputs,axis=0)
-        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
-            inputs.to_excel(writer, sheet_name='', index=False)  
-            print(f'save to {args.file}')        
-        
-        x=a
-
-    ####make_backtest_file8 制作wpg+1000+2000中beta+liquid的回测所需文件
-    if args.task=='make_backtest_file8':     
-        inputs=[]
-        st=args.st
-        et=args.et
-        dates=rqdatac.get_trading_dates(st, et, market='cn')
-        len_chosen=[]
-        for date in tqdm(dates[::args.f]): 
-            date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
-            date_n=rqdatac.get_previous_trading_date(date,n=args.days,market='cn')
-
-            weights1=rqdatac.index_weights(order_book_id='866006.RI', date=date_1)
-            weights2=rqdatac.index_weights(order_book_id='000852.XSHG', date=date_1)
-            weights3=rqdatac.index_weights(order_book_id='399303.XSHE', date=date_1)
-            weights=pd.concat([weights1,weights2,weights3])
-            weights=weights.reset_index()
-            weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
-
-            factor=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
-                                               date_n, date_1, factors = ['beta','liquidity'],
-                                               industry_mapping='citics_2019', model = 'v2')
-            
-            beta_sort=factor.sort_values('beta',ascending=False)
-            beta_sort=beta_sort.reset_index()
-            liquidity_sort=factor.sort_values('liquidity',ascending=True)
-            liquidity_sort=liquidity_sort.reset_index()
-            
-            beta_chosen=set(beta_sort['order_book_id'].iloc[:args.n])
-            liquidity_chosen=set(liquidity_sort['order_book_id'].iloc[:args.n])
-            chosen=list(beta_chosen.intersection(liquidity_chosen))
-            len_chosen.append(len(chosen))
-            
-            weights=weights[weights['order_book_id'].isin(chosen)]
-            
-            weights.columns=['TICKER','TARGET_WEIGHT']
-            weights['TRADE_DT']=date.strftime('%Y%m%d')
-            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
-            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
-            weights['TARGET_WEIGHT']=1/len(weights)
-            inputs.append(weights)
-        inputs=pd.concat(inputs,axis=0)
-        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
-            inputs.to_excel(writer, sheet_name='', index=False)  
-            print(f'save to {args.file}')        
-        
-        x=a
-        
-
-
-    ####make_backtest_file12 制作300+500+1000混在一起中beta+liquid的回测所需文件
-    if args.task=='make_backtest_file12':     
-        inputs=[]
-        st=args.st
-        et=args.et
-        dates=rqdatac.get_trading_dates(st, et, market='cn')
-        len_chosen=[]
-        for date in tqdm(dates[::args.f]): 
-            date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
-            date_n=rqdatac.get_previous_trading_date(date,n=args.days,market='cn')
-
-            weights1=rqdatac.index_weights(order_book_id='000300.XSHG', date=date_1)
-            weights2=rqdatac.index_weights(order_book_id='000905.XSHG', date=date_1)
-            weights3=rqdatac.index_weights(order_book_id='000852.XSHG', date=date_1)
-            weights=pd.concat([weights1,weights2,weights3])
-            weights=weights.reset_index()
-            weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
-
-            factor=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
-                                               date_n, date_1, factors = ['beta','liquidity'],
-                                               industry_mapping='citics_2019', model = 'v2')
-            
-            beta_sort=factor.sort_values('beta',ascending=False)
-            beta_sort=beta_sort.reset_index()
-            liquidity_sort=factor.sort_values('liquidity',ascending=True)
-            liquidity_sort=liquidity_sort.reset_index()
-            
-            beta_chosen=set(beta_sort['order_book_id'].iloc[:800])
-            liquidity_chosen=set(liquidity_sort['order_book_id'].iloc[:800])
-            chosen=list(beta_chosen.intersection(liquidity_chosen))
-            len_chosen.append(len(chosen))
-            
-            weights=weights[weights['order_book_id'].isin(chosen)]
-            
-            weights.columns=['TICKER','TARGET_WEIGHT']
-            weights['TRADE_DT']=date.strftime('%Y%m%d')
-            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
-            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
-            weights['TARGET_WEIGHT']=1/len(weights)
-            inputs.append(weights)
-        inputs=pd.concat(inputs,axis=0)
-        with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
-            inputs.to_excel(writer, sheet_name='', index=False)  
-            print(f'save to {args.file}')        
-        
-        x=a
-
-
-        
-    ####make_backtest_file14 制作1000中考虑均线趋势的size、beta、liquid的回测所需文件
-    if args.task=='make_backtest_file14':     
+    ####make_backtest_file6 制作1000中考虑均线趋势的size、beta、liquid的回测所需文件
+    if args.task=='make_backtest_file6':     
         inputs=[]
         st=args.st
         et=args.et
@@ -1663,7 +1298,7 @@ def main(args):
         df['当前拥股']=df['持仓数量'].apply(int)
         df['目标拥股']=df['持仓数量'].apply(lambda x: int(float(x) * args.ratio))
         df['调整股数']=df['目标拥股']-df['当前拥股']
-        # df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
+        df['调整股数']=df['调整股数'].apply(lambda x: round(x / 100) * 100)
         df=df.sort_values('调整股数',ascending=True)
         df=df[df['调整股数']!=0]
         
@@ -2547,32 +2182,52 @@ def main(args):
         
     ####basis_study IM基差研究
     if args.task=='basis_study':   
-        # basis=rqdatac.futures.get_basis(order_book_ids='IM2512', 
-        #                                 start_date=args.st,end_date=args.et,
-        #                                 fields=None,frequency='1d')
 
+
+        # months = ['2301','2302','2304','2305','2307','2308','2310','2311',
+        #           '2401','2402','2404','2405','2407','2408','2410','2411',
+        #           '2501','2502','2504','2505','2507','2508']
+        months = ['2303','2306','2309','2312','2403','2406','2409','2412','2503','2506','2509']
+        basiss=[]
+        for month in months:
+            basis=rqdatac.futures.get_basis(order_book_ids=f'IM{month}', 
+                                            start_date=20220101,end_date=20251001,
+                                            fields=None,frequency='1d')
+            basis.index = basis.index.get_level_values(1)
+            basiss.append(basis)
         
-        basis=rqdatac.futures.get_dominant_price(underlying_symbols='IM'
-                                                 ,start_date=args.st,end_date=args.et,
-                                                 frequency='1d',fields=None,
-                                                 adjust_type='none', 
-                                                 adjust_method='prev_close_ratio')
-        basis.index = basis.index.get_level_values(1)
         
-        zz1000=rqdatac.get_price(order_book_ids='000852.XSHG', 
-                  start_date=basis.index[0], 
-                  end_date=basis.index[-1], 
-                  frequency='1d', 
-                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                  expect_df=True,time_slice=None) 
-        zz1000.index = zz1000.index.get_level_values(1)
+        fig, axes = plt.subplots(nrows=len(basiss), ncols=1, figsize=(10, 16), sharex=True)  # sharex=True共享x轴
+        res=[]
+        for i, ax in enumerate(axes):  # axes是子图坐标轴列表，共4个元素（0-3对应4行）
+            xx=basiss[i]['basis'].reset_index(drop=True)
+            res.append(xx)
+            xx.plot(ax=ax)  # 指定ax参数将图表绘制到对应子图
+            ax.set_title(f'Subplot {i+1}')  # 设置子图标题（可选）
+            ax.grid(linestyle='--', alpha=0.7)  # 添加网格线（可选）
+         
+        plt.tight_layout()
+        plt.show()
         
-        res=basis[['close']].join(zz1000[['close']], lsuffix='_basis', rsuffix='_zz1000')
-        res['basis_ratio']=(res['close_basis']-res['close_zz1000'])/res['close_zz1000']
-        res['basis_ratio'].hist()
-        print(res['basis_ratio'].describe())
-        res['basis_ratio'].plot()
-        xx=1
+        cc=pd.concat(res,axis=1)
+        cc=cc.ffill()
+        cc['mean'] = cc.mean(axis=1)
+        cc['mean'].plot()
+        x=1
+        # zz1000=rqdatac.get_price(order_book_ids='000852.XSHG', 
+        #           start_date=basis.index[0], 
+        #           end_date=basis.index[-1], 
+        #           frequency='1d', 
+        #           fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+        #           expect_df=True,time_slice=None) 
+        # zz1000.index = zz1000.index.get_level_values(1)
+        
+        # res=basis[['close']].join(zz1000[['close']], lsuffix='_basis', rsuffix='_zz1000')
+        # res['basis_ratio']=(res['close_basis']-res['close_zz1000'])/res['close_zz1000']
+        # res['basis_ratio'].hist()
+        # print(res['basis_ratio'].describe())
+        # res['basis_ratio'].plot()
+        # xx=1
         
         
     ####wpg_drop_study 微盘股大跌研究
@@ -2722,10 +2377,10 @@ def main(args):
         #                                     end_date=args.et,
         #                                     frequency='1d',fields=None,adjust_type='pre', adjust_method='prev_close_spread')
         
-        # # IM_basis=rqdatac.futures.get_basis(order_book_ids='IM2506', 
-        # #                                 start_date=args.st, 
-        # #                                 end_date=args.et,
-        # #                                 fields=None,frequency='1d')
+        # IM_basis=rqdatac.futures.get_basis(order_book_ids='IM2506', 
+        #                                 start_date=args.st, 
+        #                                 end_date=args.et,
+        #                                 fields=None,frequency='1d')
 
         
         # IM_basis.index = IM_basis.index.get_level_values(1)
@@ -4128,6 +3783,7 @@ if __name__ == '__main__':
     # 000300.XSHG,"09:31-11:30,13:01-15:00",0.0,沪深300
     # 399303.XSHE,"09:31-11:30,13:01-15:00",0.0,国证2000
     # 932000.INDX,"09:31-11:30,13:01-15:00",0.0,中证2000指数
+    # 931080.INDX,"09:31-11:30,13:01-15:00",0.0,中证30年期国债指数
     
     # args.id1='000001.XSHG' #上证
     # args.id2='399106.XSHE' #深证
@@ -4148,14 +3804,14 @@ if __name__ == '__main__':
     # args.et='20250707'    
     
     args.task='factor_study2'
-    args.st='20250701' ##全周期，有数据的第一天
-    args.et='20250925'    
+    args.st='20250619' ##全周期，有数据的第一天
+    args.et='20251014'    
     # args.universe='whole_market'
     # args.universe='000300.XSHG'   ##300
     # args.universe='000905.XSHG'   ##500
     # args.universe='000906.XSHG'   ##800
-    # args.universe='000852.XSHG' ##1000
-    args.universe='399303.XSHE' ##国证2000
+    args.universe='000852.XSHG' ##1000
+    # args.universe='399303.XSHE' ##国证2000
     
     
     # args.st='20070205'   ##牛市1，有数据的第一天
@@ -4245,14 +3901,36 @@ if __name__ == '__main__':
     
     # args.task='wpg_hlg_return_study'
     # args.st='20170101'
-    # args.et='20250903'
+    # args.et='20251012'
     
     
-    # args.task='make_backtest_file0'
+    
+    args.task='make_backtest_file1'
+    args.ids=[
+              '000852.XSHG',
+              '932000.INDX',
+              # '866006.RI',
+              ]
+    
+    args.factors={
+        'size':-0.4,
+        'earnings_yield':0.2,
+        'beta':0.2,
+        'liquidity':-0.2,
+        }
+    args.top_n=100
+    args.st='20230901'
+    args.et='20250915'
+    args.days=1   ##因子回看天数
+    args.f=5   ##调仓频率
+    args.file=r'data/增强等权周频.xlsx'
+    
+    
+    # args.task='make_backtest_file3' ##自制因子
     # args.ids=[
-    #           # '000852.XSHG',
-    #           # '932000.INDX',
-    #           '866006.RI',
+    #           '000852.XSHG',
+    #           '932000.INDX',
+    #           # '866006.RI',
     #           ]
     
     # args.factors=[
@@ -4267,159 +3945,6 @@ if __name__ == '__main__':
     # args.f=5   ##调仓频率
     # args.file=r'data/增强等权周频.xlsx'
     
-    args.task='make_backtest_file00' ##自制因子
-    args.ids=[
-              '000852.XSHG',
-              '932000.INDX',
-              # '866006.RI',
-              ]
-    
-    args.factors=[
-        # 'size',
-        'beta',
-        # 'liquidity',
-        ]
-    # args.st='20250819'
-    args.st='20230901'
-    args.et='20250919'
-    args.days=1   ##因子回看天数
-    args.f=5   ##调仓频率
-    args.file=r'data/增强等权周频.xlsx'
-    
-    # args.task='make_backtest_file2'
-    # args.st='20250407'
-    # args.et='20250828'
-    # args.f=1
-    # args.file=r'data/米筐微盘股macd日频.xlsx'
-    
-    # args.task='make_backtest_file3'
-    # args.st='20200101's
-    # args.et='20250321'
-    # args.f=1
-    # args.file=r'data/米筐微盘股红利股择时等权日频_1412月空仓.xlsx'
-    
-    # args.task='make_backtest_file4'
-    # args.st='20140501'
-    # args.et='20150501'
-    # args.days=5   ##beta因子回看天数
-    # args.f=21   ##调仓频率
-    # args.n=200 ##top多少票
-    # args.file=r'data/中证500beta增强等权周频.xlsx'
-    
-    # args.task='make_backtest_file5'
-    # # args.id='866006.RI'
-    # # args.id='000985.XSHG'
-    # # args.id='399303.XSHE'
-    # args.id='000852.XSHG'
-    
-    # args.st='20250101'
-    # args.et='20250915'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.n=300 ##top多少票
-    # # args.factor='size'
-    # # args.ascending=True ##因子暴露升序/降序
-    # # args.factor='liquidity'
-    # # args.ascending=True ##因子暴露升序/降序
-    # args.factor='momentum'
-    # args.ascending=False ##因子暴露升序/降序
-    # # args.factor='beta'
-    # # args.ascending=False ##因子暴露升序/降序
-    # args.file=r'data/1000增强等权周频.xlsx'
-    # # args.file=r'data/全A增强等权月频.xlsx'
-    
-    # args.task='make_backtest_file6'  ##综合size+liquidity因子
-    # # args.id='000300.XSHG'
-    # # args.id='000852.XSHG'
-    # # args.id='399303.XSHE'
-    # args.id='866006.RI'
-    # args.st='20240922'
-    # args.et='20250915'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.n=200 ##top多少票
-    # args.file=r'data/微盘股增强等权周频.xlsx'
-
-    
-    # args.task='make_backtest_file7'  ##制作wind预增指数回测所需文件
-    # args.file=r'data/wind预增指数周频2.xlsx'
-    
-    # args.task='make_backtest_file8'  ##制作wpg+1000+2000中beta+liquid的回测所需文件
-    # args.st='20201009'
-    # args.et='20210901'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.n=1000 ##top多少票
-    # args.file=r'data/微盘股_1000_2000增强等权周频.xlsx'
-    
-    # args.task='make_backtest_file9'  ##制作wpg+1000+2000中beta+liquid的回测所需文件
-    # args.st='20240924'
-    # args.et='20250827'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.n=300 ##top多少票
-    # args.file=r'data/微盘股_1000_2000增强等权周频.xlsx'
-    
-    # args.task='make_backtest_file10'  ##制作wpg+1000+2000中beta、liquid的回测所需文件
-    # args.st='20190103'
-    # args.et='20210218'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.factor='liquidity'
-    # args.ascending=True ##因子暴露升序/降序
-    # # args.factor='beta'
-    # # args.ascending=False ##因子暴露升序/降序
-    # args.file=r'data/300_500_1000增强等权周频.xlsx'
-    
-    # args.task='make_backtest_file11'  ##制作wpg+1000+2000中beta+liquid的回测所需文件
-    # args.st='20240924'
-    # args.et='20250731'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.file=r'data/300_500_1000增强等权周频.xlsx'
-    
-    # args.task='make_backtest_file12'  ##制作wpg+1000+2000中beta+liquid的回测所需文件
-    # args.st='20240924'
-    # args.et='20250731'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.file=r'data/300_500_1000增强等权周频.xlsx'
-    # args.task='yz_factor_analysis'  ##预增指数因子分析
-
-    # args.task='make_backtest_file13'  ##制作100中beta+liquid的回测所需文件
-    # args.st='20230901'
-    # args.et='20250915'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.n=500 ##top多少票
-    # args.universe='000852.XSHG'
-    # args.file=r'data/1000增强等权周频.xlsx'
-    # args.n=700 ##top多少票
-    # args.universe='932000.INDX'
-    # args.file=r'data/2000增强等权周频.xlsx'
-    
-    # args.task='make_backtest_file14'  ##制作1000中考虑均线趋势的size、beta、liquid的回测所需文件
-    # args.st='20180126'
-    # args.et='20250731'
-    # args.f=5   ##调仓频率
-    # args.universe='000852.XSHG'
-    # args.file=r'data/1000增强等权周频.xlsx'
-        
-    # args.st='20170611'
-    # args.et='20250814'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.n=300 ##top多少票
-    # # args.factor='size'
-    # # args.factor='liquidity'
-    # # args.factor='beta'
-    # # args.ascending=False ##因子暴露升序/降序
-    # # args.file=r'data/中证1000中性等权周频.xlsx'
-    # # args.file=r'data/中证1000中性等权月频.xlsx'
-    # # args.file=r'data/低流股bot400等权月频.xlsx'
-    # args.file=r'data/微盘股增强等权周频.xlsx'
-    # args.file=r'data/沪深300增强等权月频.xlsx'
-    # args.file=r'data/国证2000增强等权周频.xlsx'
     
     # args.task='backtest'
     # args.st='20200101'
@@ -4440,11 +3965,6 @@ if __name__ == '__main__':
     # args.st='20150101'
     # args.et='20250715'
     
-    # args.task='make_backtest_file'
-    # args.st='20240101'
-    # args.et='20241231'
-    # args.k=200
-    # args.file=r'data/多因子策略等权.xlsx'
     
     # args.task='exp'
     # args.method='compare_rq_wind'
@@ -4497,20 +4017,20 @@ if __name__ == '__main__':
     #     'beta',
     #     'liquidity',
     #     ]
-    # args.et=pd.to_datetime('20250924')
-    # args.money=162e4
+    # args.et=pd.to_datetime('20251009')
+    # args.money=175e4
     
     
     
     
     
     # args.task='rq_wpg_adjust_ATX'
-    # args.pms_file='PMS_csv/共同target_2025-09-08.xlsx' ##目标持仓
-    # args.start_time='20250909T093000000'
-    # args.end_time=  '20250909T100000000'  
+    # args.pms_file='PMS_csv/共同target_2025-10-09.xlsx' ##目标持仓
+    # args.start_time='20251010T093000000'
+    # args.end_time=  '20251010T093500000'  
     
-    # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250909090336.xlsx'  ##现有持仓
-    # args.ATX_file='ATX_csv/ATX_stock_2025-09_09百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'  ##现有持仓
+    # args.ATX_file='ATX_csv/ATX_stock_2025-10_10百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250901090843.xlsx'
@@ -4522,12 +4042,12 @@ if __name__ == '__main__':
     # args.ATX_file='ATX_csv/成交查询绝对收益_20250429095802.xls'
     
     # args.task='ATX_to_ATX_adjust'
-    # args.st='20250912T093000000'
-    # args.et='20250912T094500000'  
-    # args.ratio=0
+    # args.st='20251013T093000000'
+    # args.et='20251013T100000000'  
+    # args.ratio=0.8
     
-    # args.ATX_pos_file='ATX_csv/百里挑一持仓查询_20250912090921.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-09-12_百里挑一信用.csv'
+    # args.ATX_pos_file='ATX_csv/持仓查询_20251013091427.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-10-13_百里挑一信用.csv'
     # args.account='百榕百里挑一稳健一号信用'
     
     # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250904085849.xlsx'
