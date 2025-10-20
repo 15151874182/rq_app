@@ -298,7 +298,7 @@ def main(args):
             exposure=exposure.sort_values('score',ascending=False)
             chosen=set(exposure.iloc[:args.top_n].index.get_level_values(1))
             weights=weights[weights['order_book_id'].isin(chosen)]
-            number=[]
+            # number=[]
             # for id in args.ids:   ##成分股占比监测
             #     part=rqdatac.index_weights(order_book_id=id, date=date_1)
             #     n=len(weights[weights['order_book_id'].isin(list(part.index))])
@@ -934,7 +934,7 @@ def main(args):
         print(df.index==size_sort.index)
         xx=1
         
-    ####！！！！compare_rq_cty_liquidity_factor 对比自己复现和米筐的liquidity因子排序是否一致
+    ####compare_rq_cty_liquidity_factor 对比自己复现和米筐的liquidity因子排序是否一致
     if args.task=='compare_rq_cty_liquidity_factor':  
         print('compare_rq_cty_liquidity_factor...')
         
@@ -3804,14 +3804,14 @@ if __name__ == '__main__':
     # args.et='20250707'    
     
     args.task='factor_study2'
-    args.st='20250619' ##全周期，有数据的第一天
-    args.et='20251014'    
+    args.st='20180126' ##全周期，有数据的第一天
+    args.et='20250731'    
     # args.universe='whole_market'
     # args.universe='000300.XSHG'   ##300
     # args.universe='000905.XSHG'   ##500
     # args.universe='000906.XSHG'   ##800
-    args.universe='000852.XSHG' ##1000
-    # args.universe='399303.XSHE' ##国证2000
+    # args.universe='000852.XSHG' ##1000
+    args.universe='399303.XSHE' ##国证2000
     
     
     # args.st='20070205'   ##牛市1，有数据的第一天
@@ -3905,25 +3905,25 @@ if __name__ == '__main__':
     
     
     
-    args.task='make_backtest_file1'
-    args.ids=[
-              '000852.XSHG',
-              '932000.INDX',
-              # '866006.RI',
-              ]
+    # args.task='make_backtest_file1'
+    # args.ids=[
+    #           '000852.XSHG',
+    #           '932000.INDX',
+    #           # '866006.RI',
+    #           ]
     
-    args.factors={
-        'size':-0.4,
-        'earnings_yield':0.2,
-        'beta':0.2,
-        'liquidity':-0.2,
-        }
-    args.top_n=100
-    args.st='20230901'
-    args.et='20250915'
-    args.days=1   ##因子回看天数
-    args.f=5   ##调仓频率
-    args.file=r'data/增强等权周频.xlsx'
+    # args.factors={
+    #     'size':-0.4,
+    #     'earnings_yield':0.2,
+    #     'beta':0.2,
+    #     'liquidity':-0.2,
+    #     }
+    # args.top_n=100
+    # args.st='20230901'
+    # args.et='20251016'
+    # args.days=1   ##因子回看天数
+    # args.f=5   ##调仓频率
+    # args.file=r'data/增强等权周频.xlsx'
     
     
     # args.task='make_backtest_file3' ##自制因子

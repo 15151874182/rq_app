@@ -55,9 +55,9 @@ def main(args):
         res.to_csv('DFCF_csv/input/test.order2.csv',index=False)
         xx=1
 
-    ####!!!!!!!target_pos 根据任意池子+任意因子等权生成dfcf目标持仓
-    if args.task=='target_pos':  
-        print('target_pos...')
+    ####!!!!!!!generate_target_pos 根据任意池子+任意因子等权生成dfcf目标持仓
+    if args.task=='generate_target_pos':  
+        print('generate_target_pos...')
         
         weights=[]
         for id in args.ids:
@@ -74,30 +74,26 @@ def main(args):
         cc=set(cc['order_book_id'])
         weights=weights[~weights['order_book_id'].isin(cc)]        
         
-        n=len(args.factors)
-        chosen=set(weights['order_book_id'])
-        if n==1:  ##1000+2000,size,liq,beta,交集100
-            top_n=100
-        elif n==2:
-            top_n=850
-        elif n==3:
-            top_n=1250
-        for factor in args.factors:
-            exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
-                                               args.et, args.et, factors = factor,
-                                               industry_mapping='citics_2019', model = 'v2')
-            if factor=='size' or factor=='liquidity':
-                sort=exposure.sort_values(factor,ascending=True)
-            elif factor=='beta':
-                sort=exposure.sort_values(factor,ascending=False)
-            sort=sort.reset_index()
-            chosen2=set(sort['order_book_id'].iloc[:top_n])
-            chosen=chosen & chosen2
+        exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
+                                           args.et, args.et, factors = list(args.factors.keys()),
+                                           industry_mapping='citics_2019', model = 'v2')
+        # 计算综合评分（值越高越符合目标）
+        exposure['score']=0
+        for factor in list(args.factors.keys()):
+            exposure['score']+=exposure[factor] *args.factors[factor]
             
+        exposure=exposure.sort_values('score',ascending=False)
+        chosen=set(exposure.iloc[:args.top_n].index.get_level_values(1))
         df=weights[weights['order_book_id'].isin(chosen)]
-        df.columns=['id','weight']
+        number=[]
+        for id in args.ids:   ##成分股占比监测
+            part=rqdatac.index_weights(order_book_id=id, date=args.et)
+            n=len(df[df['order_book_id'].isin(list(part.index))])
+            number.append([id,n])
+        print(number)
         
-            
+        
+        df.columns=['id','weight']
         df['weight']=1/len(df) ##重新计算权重
         df['买卖日期']=args.et.strftime('%Y-%m-%d')
         df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
@@ -212,8 +208,32 @@ def main(args):
         res.to_csv(path,index=False)
         print(f'save to {path}')
 
-
-
+    ####!!!!!!!trade_log_to_pms 根据成交记录，变成pms追踪
+    if args.task=='trade_log_to_pms':  
+        print('trade_log_to_pms...')
+        
+        df=pd.read_csv(args.trade_log)
+        df=df[['created_at','symbol','price','volume','side']]
+        df.columns=['买卖日期','证券代码', '买卖价格', '买卖数量', '买卖方向']
+        df['买卖日期']=df['买卖日期'].apply(lambda x:x.split('T')[0])
+        df['证券代码']=df['证券代码'].apply(lambda x:x.split('.')[1]+'.'+x.split('.')[0][:2])
+        df['买卖方向']=df['买卖方向'].apply(lambda x:'买入' if x==1 else '卖出')
+        
+        cash = {'证券代码': 'CNY', '买卖数量': np.nan, '买卖价格': np.nan, '买卖方向': '划入'}            
+        future = {'证券代码': 'IM2510.CFE', '买卖数量': np.nan, '买卖价格': np.nan, '买卖方向': '空开'}            
+        cash=pd.DataFrame([cash])
+        future=pd.DataFrame([future])
+        res=pd.concat([cash,future,df])   
+        
+        acc='DFCF'  ##文件名和账户名有关联
+        now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")##文件名和时间有关联
+        path=f'./PMS_csv/{acc}_{now}.xlsx'  
+        with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
+            res.to_excel(writer, sheet_name='导入数据区', index=False)   
+            print(f'save to {path}')        
+        
+        xx=1
+        
     ####!!!!!!!basis_detect 基差监测
     if args.task=='basis_detect':  
         print('basis_detect...')
@@ -229,10 +249,10 @@ if __name__ == '__main__':
 
     # args.task='make_order'
     
-    args.task='basis_detect'
-    args.id='IM2603'
-    args.st=20250101
-    args.et=20251009
+    # args.task='basis_detect'
+    # args.id='IM2603'
+    # args.st=20250101
+    # args.et=20251009
     
     # args.task='adjust_pos'
     # args.hold_pos='DFCF_csv/持仓/持仓篮子_25-9-29.csv'
@@ -240,20 +260,25 @@ if __name__ == '__main__':
     # args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
     # args.et='2025-09-26'
     
-    # args.task='target_pos'     
+    # args.task='generate_target_pos'     
     # args.ids=[
     #           '000852.XSHG',
     #           '932000.INDX',
     #           # '866006.RI',
     #           ]
+    # args.factors={
+    #     'size':-0.5,
+    #     'earnings_yield':0.2,
+    #     'beta':0,
+    #     'liquidity':-0.3,
+    #     }
+    # args.top_n=100
+    # args.et=pd.to_datetime('20251016')
+    # args.money=155e4
+
+    args.task='trade_log_to_pms'     
+    args.trade_log='DFCF_csv/成交/execution_report.csv'
     
-    # args.factors=[
-    #     # 'size',
-    #     'beta',
-    #     'liquidity',
-    #     ]
-    # args.et=pd.to_datetime('20250926')
-    # args.money=162e4
     
     main(args)
     
