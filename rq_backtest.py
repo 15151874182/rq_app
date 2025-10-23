@@ -28,8 +28,8 @@ __config__ = {
         "accounts": {
             "STOCK": 2e7,
         },
-        "start_date": "20230901",
-        "end_date": "20251016",
+        "start_date": "20220901",
+        "end_date": "20240601",
         # 是否开启期货历史交易参数进行回测
         # "futures_time_series_trading_parameters": True,
     },

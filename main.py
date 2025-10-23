@@ -1009,129 +1009,11 @@ def main(args):
         print(df['market_value'].describe())
         xx=1
         
-    ####rq_wpg_make_pms_csv 根据米筐微盘成分股等权生成pms目标持仓清单,liq+size
-    if args.task=='rq_wpg_make_pms_csv':  
-        print('rq_wpg_make_pms_csv...')
-        df=rqdatac.index_weights(order_book_id=args.id, date=args.et) ##中证500
-        df=df.reset_index()
-        df.columns=['id','weight']
-        
-        ##过滤被立案的
-        announcement=rqdatac.get_announcement(list(df['id']),'20240101',args.et)
-        cc=announcement[announcement['title'].str.contains('立案')]
-        cc=cc.reset_index()
-        cc=set(cc['order_book_id'])
-        df=df[~df['id'].isin(cc)] 
-        
-        
-        #取size和liquidity top300的交集
-        factor=rqdatac.get_factor_exposure(list(df['id']), 
-                                           args.et, args.et, factors = ['size','liquidity'],
-                                           industry_mapping='citics_2019', model = 'v2')
-        
-        size_sort=factor.sort_values('size',ascending=True)
-        size_sort=size_sort.reset_index()
-        liquidity_sort=factor.sort_values('liquidity',ascending=True)
-        liquidity_sort=liquidity_sort.reset_index()
-        
-        size_chosen=set(size_sort['order_book_id'].iloc[:args.n])
-        liquidity_chosen=set(liquidity_sort['order_book_id'].iloc[:args.n])
-        chosen=list(size_chosen.intersection(liquidity_chosen))
-        print('len_chosen:',len(chosen))
             
             
-        df=df[df['id'].isin(chosen)]
-        df['weight']=1/len(df) ##重新计算权重
-        df['买卖日期']=args.et.strftime('%Y-%m-%d')
-        df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
-        df['name']=[i.symbol for i in rqdatac.instruments(list(df['id']), market='cn')]
-        df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['id']), 
-                  start_date=args.et, 
-                  end_date=args.et, 
-                  frequency='1d', 
-                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                  expect_df=True,time_slice=None)['close'])   
-        each=args.money/len(df)
-        df['买卖数量']=df['买卖价格'].apply(lambda close:int(each//(close*100)*100))
-        df.loc[(df['证券代码'].str.startswith('688')) & (df['买卖数量'] == 100), '买卖数量'] = 200 ##科创板至少200股
-        df['买卖方向']='买入'
-        res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
-        # cash = {'证券代码': 'CNY', '买卖数量': '700000', '买卖价格': 1, '买卖方向': '划入'}            
-        # cash=pd.DataFrame([cash])
-        # res=pd.concat([cash,df2])   
-        # res=df2
-        # res.insert(0, '买卖日期', '2024-11-26')
-        
-        acc='共同target'  ##文件名和账户名有关联
-        now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
-        path=f'./PMS_csv/{acc}_{now}.xlsx'  
-        with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
-            res.to_excel(writer, sheet_name='导入数据区', index=False)   
-            print(f'save to {path}')
-            res2=df[['id','name']]
-            res2.to_excel(writer, sheet_name='股票名清单', index=False)      
-            
-    ####rq_wpg_make_pms_csv2 根据米筐微盘成分股等权生成pms目标持仓清单,liq
-    if args.task=='rq_wpg_make_pms_csv2':  
-        print('rq_wpg_make_pms_csv2...')
-        df=rqdatac.index_weights(order_book_id=args.id, date=args.et) ##中证500
-        df=df.reset_index()
-        df.columns=['id','weight']
-        
-        ##过滤被立案的
-        announcement=rqdatac.get_announcement(list(df['id']),'20240101',args.et)
-        cc=announcement[announcement['title'].str.contains('立案')]
-        cc=cc.reset_index()
-        cc=set(cc['order_book_id'])
-        df=df[~df['id'].isin(cc)] 
-        
-        
-        #取size和liquidity top300的交集
-        factor=rqdatac.get_factor_exposure(list(df['id']), 
-                                           args.et, args.et, factors = ['size','liquidity'],
-                                           industry_mapping='citics_2019', model = 'v2')
-        
-        liquidity_sort=factor.sort_values('liquidity',ascending=True)
-        liquidity_sort=liquidity_sort.reset_index()
-        
-        chosen=list(liquidity_sort['order_book_id'].iloc[:args.n])
-            
-            
-        df=df[df['id'].isin(chosen)]
-        df['weight']=1/len(df) ##重新计算权重
-        df['买卖日期']=args.et.strftime('%Y-%m-%d')
-        df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
-        df['name']=[i.symbol for i in rqdatac.instruments(list(df['id']), market='cn')]
-        df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['id']), 
-                  start_date=args.et, 
-                  end_date=args.et, 
-                  frequency='1d', 
-                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                  expect_df=True,time_slice=None)['close'])   
-        each=args.money/len(df)
-        df['买卖数量']=df['买卖价格'].apply(lambda close:int(each//(close*100)*100))
-        df.loc[(df['证券代码'].str.startswith('688')) & (df['买卖数量'] == 100), '买卖数量'] = 200 ##科创板至少200股
-        df['买卖方向']='买入'
-        res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
-        # cash = {'证券代码': 'CNY', '买卖数量': '700000', '买卖价格': 1, '买卖方向': '划入'}            
-        # cash=pd.DataFrame([cash])
-        # res=pd.concat([cash,df2])   
-        # res=df2
-        # res.insert(0, '买卖日期', '2024-11-26')
-        
-        acc='共同target'  ##文件名和账户名有关联
-        now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
-        path=f'./PMS_csv/{acc}_{now}.xlsx'  
-        with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
-            res.to_excel(writer, sheet_name='导入数据区', index=False)   
-            print(f'save to {path}')
-            res2=df[['id','name']]
-            res2.to_excel(writer, sheet_name='股票名清单', index=False)  
-            
-            
-    ####!!!!!!!rq_wpg_make_pms_csv3 根据任意池子+任意因子等权生成pms目标持仓清单
-    if args.task=='rq_wpg_make_pms_csv3':  
-        print('rq_wpg_make_pms_csv3...')
+    ####!!!!!!!generate_target_pos 根据任意池子+任意因子等权生成ATX目标持仓
+    if args.task=='generate_target_pos':  
+        print('generate_target_pos...')
         
         weights=[]
         for id in args.ids:
@@ -1148,25 +1030,23 @@ def main(args):
         cc=set(cc['order_book_id'])
         weights=weights[~weights['order_book_id'].isin(cc)]        
         
-        n=len(args.factors)
-        chosen=set(weights['order_book_id'])
-        if n==1:  ##1000+2000,size,liq,beta,交集100
-            top_n=100
-        elif n==2:
-            top_n=850
-        elif n==3:
-            top_n=1250
-        for factor in args.factors:
-            exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
-                                               args.et, args.et, factors = factor,
-                                               industry_mapping='citics_2019', model = 'v2')
-            if factor=='size' or factor=='liquidity':
-                sort=exposure.sort_values(factor,ascending=True)
-            elif factor=='beta':
-                sort=exposure.sort_values(factor,ascending=False)
-            sort=sort.reset_index()
-            chosen2=set(sort['order_book_id'].iloc[:top_n])
-            chosen=chosen & chosen2
+        exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
+                                           args.et, args.et, factors = list(args.factors.keys()),
+                                           industry_mapping='citics_2019', model = 'v2')
+        # 计算综合评分（值越高越符合目标）
+        exposure['score']=0
+        for factor in list(args.factors.keys()):
+            exposure['score']+=exposure[factor] *args.factors[factor]
+            
+        exposure=exposure.sort_values('score',ascending=False)
+        chosen=set(exposure.iloc[:args.top_n].index.get_level_values(1))
+        df=weights[weights['order_book_id'].isin(chosen)]
+        number=[]
+        for id in args.ids:   ##成分股占比监测
+            part=rqdatac.index_weights(order_book_id=id, date=args.et)
+            n=len(df[df['order_book_id'].isin(list(part.index))])
+            number.append([id,n])
+        print(number)
             
         df=weights[weights['order_book_id'].isin(chosen)]
         df.columns=['id','weight']
@@ -1191,20 +1071,22 @@ def main(args):
         res=res[res['买卖数量']!=0] ##去掉价格过高，分配不到100股的票
         money=sum(res['买卖价格']*res['买卖数量'])
         
-        buy_money=res[res['买卖方向']=='买入']
-        if len(buy_money)!=0:
-            buy_money=sum(buy_money['买卖价格']*buy_money['买卖数量'])
+        buy=res[res['买卖方向']=='买入']
+        if len(buy)!=0:
+            buy_money=sum(buy['买卖价格']*buy['买卖数量'])
         else:
             buy_money=0
             
-        sell_money=res[res['买卖方向']=='卖出']
-        if len(sell_money)!=0:
-            sell_money=sum(buy_money['买卖价格']*buy_money['买卖数量'])
+        sell=res[res['买卖方向']=='卖出']
+        if len(sell)!=0:
+            sell_money=sum(sell['买卖价格']*sell['买卖数量'])
         else:
             sell_money=0        
         print('总数:',money)
         print('买入:',buy_money)
+        print('买入笔数:',len(buy))
         print('卖出:',sell_money)
+        print('卖出笔数:',len(sell))
         
         acc='共同target'  ##文件名和账户名有关联
         now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
@@ -3804,8 +3686,8 @@ if __name__ == '__main__':
     # args.et='20250707'    
     
     args.task='factor_study2'
-    args.st='20180126' ##全周期，有数据的第一天
-    args.et='20250731'    
+    args.st='20250731' ##全周期，有数据的第一天
+    args.et='20251021'    
     # args.universe='whole_market'
     # args.universe='000300.XSHG'   ##300
     # args.universe='000905.XSHG'   ##500
@@ -3905,25 +3787,25 @@ if __name__ == '__main__':
     
     
     
-    # args.task='make_backtest_file1'
-    # args.ids=[
-    #           '000852.XSHG',
-    #           '932000.INDX',
-    #           # '866006.RI',
-    #           ]
+    args.task='make_backtest_file1'
+    args.ids=[
+              # '000852.XSHG',
+              # '932000.INDX',
+              '399303.XSHE',
+              # '866006.RI',
+              ]
     
-    # args.factors={
-    #     'size':-0.4,
-    #     'earnings_yield':0.2,
-    #     'beta':0.2,
-    #     'liquidity':-0.2,
-    #     }
-    # args.top_n=100
-    # args.st='20230901'
-    # args.et='20251016'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.file=r'data/增强等权周频.xlsx'
+    args.factors={
+        'size':-0.5,
+        'beta':0.5,
+        'liquidity':-0.5,
+        }
+    args.top_n=100
+    args.st='20220901'
+    args.et='20240601'
+    args.days=1   ##因子回看天数
+    args.f=5   ##调仓频率
+    args.file=r'data/增强等权周频.xlsx'
     
     
     # args.task='make_backtest_file3' ##自制因子
@@ -3985,40 +3867,23 @@ if __name__ == '__main__':
     # args.task='cb_iv'  ##计算可转债的隐含波动率
     # args.date='20250721'
     
-    # args.task='rq_wpg_make_pms_csv'   ##size+liq
-    # # args.id='000002.XSHG' ##全A
-    # # args.id='000300.XSHG' ##沪深300
-    # # args.id='399852.XSHE' ##中证1000
-    # # args.id='000905.XSHG' ##中证500
-    # args.id='866006.RI'
-    # args.et=pd.to_datetime('20250815')
-    # args.money=200e4
-    # args.n=300 ##top多少票
     
-    # args.task='rq_wpg_make_pms_csv2'     ##liq
-    # # args.id='000002.XSHG' ##全A
-    # # args.id='000300.XSHG' ##沪深300
-    # # args.id='399852.XSHE' ##中证1000
-    # # args.id='000905.XSHG' ##中证500
-    # args.id='866006.RI'
-    # args.et=pd.to_datetime('20250908')
-    # args.money=230e4
-    # args.n=300 ##top多少票
+    args.task='generate_target_pos'     
+    args.ids=[
+              # '000852.XSHG',
+              # '932000.INDX',
+              '399303.XSHE',
+              # '866006.RI',
+              ]
     
-    # args.task='rq_wpg_make_pms_csv3'     ##liq
-    # args.ids=[
-    #           '000852.XSHG',
-    #           '932000.INDX',
-    #           # '866006.RI',
-    #           ]
-    
-    # args.factors=[
-    #     # 'size',
-    #     'beta',
-    #     'liquidity',
-    #     ]
-    # args.et=pd.to_datetime('20251009')
-    # args.money=175e4
+    args.factors={
+        'size':-0.5,
+        'beta':0.5,
+        'liquidity':-0.5,
+        }
+    args.top_n=100
+    args.et=pd.to_datetime('20251021')
+    args.money=158e4
     
     
     

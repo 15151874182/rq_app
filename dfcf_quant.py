@@ -43,17 +43,6 @@ from tools.riskfolio_func import Riskfolio
 np.random.seed(0)
 
 def main(args):
-    ####make_order ##制作扫单.csv文件
-    if args.task=='make_order': 
-        print('make_order')
-        
-        cols=['sid', 'account_id', 'symbol', 'volume', 'order_type', 'order_business(order_biz)', 'price', 'comment']
-        res=[]
-        res.append([f'{uuid.uuid4().hex}','e2cdd75b-8e51-11f0-b2eb-52560acd7da0','SZSE.000001','1000','24','2','','测试'])
-        res.append([f'{uuid.uuid4().hex}','e2cdd75b-8e51-11f0-b2eb-52560acd7da0','SHSE.600000','1000','24','2','','测试'])
-        res=pd.DataFrame(res,columns=cols)
-        res.to_csv('DFCF_csv/input/test.order2.csv',index=False)
-        xx=1
 
     ####!!!!!!!generate_target_pos 根据任意池子+任意因子等权生成dfcf目标持仓
     if args.task=='generate_target_pos':  
@@ -249,10 +238,10 @@ if __name__ == '__main__':
 
     # args.task='make_order'
     
-    # args.task='basis_detect'
-    # args.id='IM2603'
-    # args.st=20250101
-    # args.et=20251009
+    args.task='basis_detect'
+    args.id='IM2606'
+    args.st=20250101
+    args.et=20251022
     
     # args.task='adjust_pos'
     # args.hold_pos='DFCF_csv/持仓/持仓篮子_25-9-29.csv'
@@ -262,22 +251,23 @@ if __name__ == '__main__':
     
     # args.task='generate_target_pos'     
     # args.ids=[
-    #           '000852.XSHG',
-    #           '932000.INDX',
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           '399303.XSHE',
     #           # '866006.RI',
     #           ]
+    
     # args.factors={
     #     'size':-0.5,
-    #     'earnings_yield':0.2,
-    #     'beta':0,
-    #     'liquidity':-0.3,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
     #     }
     # args.top_n=100
-    # args.et=pd.to_datetime('20251016')
-    # args.money=155e4
+    # args.et=pd.to_datetime('20251021')
+    # args.money=158e4
 
-    args.task='trade_log_to_pms'     
-    args.trade_log='DFCF_csv/成交/execution_report.csv'
+    # args.task='trade_log_to_pms'     
+    # args.trade_log='DFCF_csv/成交/execution_report.csv'
     
     
     main(args)

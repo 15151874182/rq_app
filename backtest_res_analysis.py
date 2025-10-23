@@ -47,25 +47,32 @@ xx['port-future01_return']=xx['portfolio_return']*0.5-xx['future01_return']*0.5
 xx['port-future01_net']=list(Convert.returns_to_net(xx['port-future01_return']))
 
 
-##future23 目前最佳
+##future23 计算中性收益率
+benchmark_portfolio=res['sys_analyser']['benchmark_portfolio']
+portfolio=res['sys_analyser']['portfolio']
+xx=pd.concat([benchmark_portfolio['unit_net_value'],portfolio['unit_net_value']],axis=1)
+xx.columns=['benchmark','portfolio']
+xx['benchmark_return']=xx['benchmark']/xx['benchmark'].shift(1)-1
+xx['portfolio_return']=xx['portfolio']/xx['portfolio'].shift(1)-1
+xx=xx.fillna(0)
 zz1000=rqdatac.futures.get_dominant_price(underlying_symbols='IM'
-                                         ,start_date=20230901,end_date=20250915,
+                                         ,start_date=xx.index[0],end_date=xx.index[-1],
                                          frequency='1d',fields=None,
                                          adjust_type='none', 
                                          rule=2,
                                          rank=3,
                                          adjust_method='prev_close_ratio')
-
 zz1000.index = zz1000.index.get_level_values(1)
-
 zz1000['future23_return']=zz1000['close']/zz1000['prev_settlement']-1
 xx['future23_return']=zz1000['future23_return']
-xx.loc['2023-09-01','future23_return']=0
+xx.loc[zz1000.index[0],'future23_return']=0
 # xx['port-future23_return']=xx['portfolio_return']*0.5-xx['future23_return']*0.5
 xx['port-future23_return']=xx['portfolio_return']*0.545-xx['future23_return']*0.454
 xx['port-future23_net']=list(Convert.returns_to_net(xx['port-future23_return']))
-
+print(xx['portfolio_return'].corr(xx['future23_return']))
 Metrics.print_metrics(xx['port-future23_return'],xx.index,0.017)
+
+
 
 # down=xx[xx['return']<0]
 # np.std(down2['return'])*np.sqrt(252)
