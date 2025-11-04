@@ -215,7 +215,7 @@ def main(args):
         res=pd.concat([cash,future,df])   
         
         acc='DFCF'  ##文件名和账户名有关联
-        now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")##文件名和时间有关联
+        now = res['买卖日期'].iloc[-1]
         path=f'./PMS_csv/{acc}_{now}.xlsx'  
         with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
             res.to_excel(writer, sheet_name='导入数据区', index=False)   
@@ -229,6 +229,7 @@ def main(args):
         basis=rqdatac.futures.get_basis(order_book_ids=args.id, 
                                         start_date=args.st,end_date=args.et,
                                         fields=None,frequency='1d')
+        print('days:',len(basis))
         basis['basis'].plot()
         
 if __name__ == '__main__':
@@ -238,16 +239,16 @@ if __name__ == '__main__':
 
     # args.task='make_order'
     
-    args.task='basis_detect'
-    args.id='IM2606'
-    args.st=20250101
-    args.et=20251022
+    # args.task='basis_detect'
+    # args.id='IM2603'
+    # args.st=20250101
+    # args.et=20251031
     
     # args.task='adjust_pos'
-    # args.hold_pos='DFCF_csv/持仓/持仓篮子_25-9-29.csv'
-    # args.target_pos='DFCF_csv/篮子/目标篮子_2025-09-26.csv'
+    # args.hold_pos='DFCF_csv/持仓/positions.csv'
+    # args.target_pos='DFCF_csv/篮子/目标篮子_2025-10-28.csv'
     # args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
-    # args.et='2025-09-26'
+    # args.et='2025-10-29'
     
     # args.task='generate_target_pos'     
     # args.ids=[
@@ -263,11 +264,11 @@ if __name__ == '__main__':
     #     'liquidity':-0.5,
     #     }
     # args.top_n=100
-    # args.et=pd.to_datetime('20251021')
+    # args.et=pd.to_datetime('20251028')
     # args.money=158e4
 
-    # args.task='trade_log_to_pms'     
-    # args.trade_log='DFCF_csv/成交/execution_report.csv'
+    args.task='trade_log_to_pms'     
+    args.trade_log='DFCF_csv/成交/execution_report25-10-29.csv'
     
     
     main(args)

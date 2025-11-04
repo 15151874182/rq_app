@@ -429,6 +429,10 @@ def main(args):
         et=args.et
         dates=rqdatac.get_trading_dates(st, et, market='cn')
         len_chosen=[]
+        import statsmodels.formula.api as smf
+        from scipy.stats.mstats import winsorize
+        from sklearn.preprocessing import StandardScaler
+            
         for date in tqdm(dates[::args.f]): 
             date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
             date_n=rqdatac.get_previous_trading_date(date,n=args.days,market='cn')
@@ -443,27 +447,8 @@ def main(args):
 
             n=len(args.factors)
             chosen=set(weights['order_book_id'])
-            if n==1:  ##1000+2000,size,liq,beta,交集100
-                top_n=100
-            elif n==2:
-                top_n=800
-            elif n==3:
-                top_n=1250
-            # if n==1:  ##1000+2000,size,liq,beta,交集200
-            #     top_n=200
-            # elif n==2:
-            #     top_n=1000
-            # elif n==3:
-            #     top_n=1450
-            # if n==1:  ##1000+2000,size,liq,beta,交集300
-            #     top_n=300
-            # elif n==2:
-            #     top_n=1200
-            # elif n==3:
-            #     top_n=1550
             
-            
-            ##beta复现
+            ###########################beta复现
             date_1=rqdatac.get_previous_trading_date(date,n=1,market='cn')
             date_252=rqdatac.get_previous_trading_date(date,n=252,market='cn')
             wpg=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
@@ -482,13 +467,7 @@ def main(args):
                
             hs300['return']=hs300['close']/hs300['close'].shift(1)-1
             hs300=hs300.bfill()
-     
-             # wpg['return']=wpg['close']/wpg['prev_close']-1
-             # hs300['return']=hs300['close']/hs300['prev_close']-1
-     
             hs300.index = hs300.index.get_level_values(1)
-     
-            import statsmodels.formula.api as smf
             def func(df,hs300):
                 df.index = df.index.get_level_values(1)
                 df['return']=df['close']/df['close'].shift(1)-1
@@ -508,47 +487,53 @@ def main(args):
                 return beta
             
             df=wpg.groupby(level=0).apply(func,hs300)
-            df=df.sort_values(ascending=False)
+            df=pd.DataFrame(df,columns=['beta'])
+            df['beta_winsorized'] = winsorize(df['beta'],limits=(0.03, 0.03))  # 上下截断比例：下5%和上5%
+            df['beta_winsorized_01']=(df['beta_winsorized']-df['beta_winsorized'].min()) / (df['beta_winsorized'].max()-df['beta_winsorized'].min())
+            # df['beta_winsorized_standard']=(df['beta_winsorized']-df['beta_winsorized'].mean())/df['beta_winsorized'].std()
             
-            
-            
-            chosen2=set(df.index[:top_n])
-            
-            # ##size复现
-            # shares=rqdatac.get_shares(list(weights['order_book_id']), start_date=date, end_date=date, fields=None, market='cn', expect_df=True)['total_a'] 
-            # shares.index = shares.index.get_level_values(0)
+            ###########################size复现
+            shares=rqdatac.get_shares(list(weights['order_book_id']), start_date=date, end_date=date, fields=None, market='cn', expect_df=True)['total_a'] 
+            shares.index = shares.index.get_level_values(0)
 
-            # close=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
-            #           start_date=date, 
-            #           end_date=date, 
-            #           frequency='1d', 
-            #           fields=None, adjust_type='none', skip_suspended =False, market='cn',  ##要不复权的价格！！！
-            #           expect_df=True,time_slice=None)['close']
-            # close.index = close.index.get_level_values(0)
+            close=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
+                      start_date=date, 
+                      end_date=date, 
+                      frequency='1d', 
+                      fields=None, adjust_type='none', skip_suspended =False, market='cn',  ##要不复权的价格！！！
+                      expect_df=True,time_slice=None)['close']
+            close.index = close.index.get_level_values(0)
+            df2=weights.set_index('order_book_id')
+            shares = shares.to_frame(name='total_share') 
+            close = close.to_frame(name='close') 
+            df2=df2.join(shares).join(close)
             
-            # df=weights.set_index('order_book_id')
+            df2['market_value']=df2['close']*df2['total_share'] ##总市值
+            df2['size_winsorized'] = winsorize(df2['market_value'],limits=(0.03, 0.03))  # 上下截断比例：下5%和上5%
+            df2['size_winsorized_01']=(df2['size_winsorized']-df2['size_winsorized'].min()) / (df2['size_winsorized'].max()-df2['size_winsorized'].min())
+            # df2['size_winsorized_standard']=(df2['size_winsorized']-df2['size_winsorized'].mean())/df2['size_winsorized'].std()
             
-            # shares = shares.to_frame(name='total_share') 
-            # close = close.to_frame(name='close') 
-            # df=df.join(shares).join(close)
+            ############################liquidity复现
+            turnover=rqdatac.get_turnover_rate(list(weights['order_book_id']), 
+                                               start_date=date, end_date=date, 
+                                               fields=None,expect_df=True)
+            turnover.index = turnover.index.get_level_values(0)
+            turnover = turnover[~(turnover == 0).all(axis=1)]
+            turnover['liquidity']=0.35*turnover['week']+0.35*turnover['month']+0.3*turnover['year']
+            turnover['liquidity_winsorized'] = winsorize(turnover['liquidity'],limits=(0.03, 0.03))  # 上下截断比例：下5%和上5%
+            turnover['liquidity_winsorized_01']=(turnover['liquidity_winsorized']-turnover['liquidity_winsorized'].min()) / (turnover['liquidity_winsorized'].max()-turnover['liquidity_winsorized'].min())
+            # turnover['liquidity_winsorized_standard']=(turnover['liquidity_winsorized']-turnover['liquidity_winsorized'].mean())/turnover['liquidity_winsorized'].std()
             
-            # df['market_value']=df['close']*df['total_share'] ##总市值
-            # df=df.sort_values('market_value',ascending=True)
-            # chosen2=set(df.index[:top_n])
-            
-            ##liquidity复现
-            # turnover=rqdatac.get_turnover_rate(list(weights['order_book_id']), 
-            #                                    start_date=date, end_date=date, 
-            #                                    fields=None,expect_df=True)
-            # turnover.index = turnover.index.get_level_values(0)
-            # turnover = turnover[~(turnover == 0).all(axis=1)]
-            # turnover['liquidity']=0.35*turnover['week']+0.35*turnover['month']+0.3*turnover['year']
-            # turnover=turnover.sort_values('liquidity',ascending=True)
-            # chosen2=set(turnover.index[:top_n])
+            res=df[['beta_winsorized_01']].join(df2[['size_winsorized_01']]).join(turnover[['liquidity_winsorized_01']])
+            res.columns=['beta','size','liquidity']
+            # 计算综合评分（值越高越符合目标）
+            res['score']=0
+            for factor in list(args.factors.keys()):
+                res['score']+=res[factor] *args.factors[factor]
+            res=res.sort_values('score',ascending=False)
+            chosen=set(res.iloc[:args.top_n].index)
             
             
-            chosen=chosen & chosen2
-                
             weights=weights[weights['order_book_id'].isin(chosen)]
             
             weights.columns=['TICKER','TARGET_WEIGHT']
@@ -1678,6 +1663,31 @@ def main(args):
         result=pd.DataFrame(result,columns=['zzhl','zzyh'])
         
         xx=a
+        
+        
+    ####concept_study 主题投资研究
+    if args.task=='concept_study':   
+        res=[]
+        industrys=rqdatac.get_industry_mapping(source='citics', date=None, market='cn')
+        for industry in tqdm(list(industrys['third_industry_name'])):
+            df=rqdatac.get_industry(industry, source='citics', date=None, market='cn')
+            if df:
+                xx=rqdatac.get_price_change_rate(df, args.st, args.et).T
+                res.append([industry,xx.mean()[0],xx.mean()[1]])
+        res=pd.DataFrame(res)
+        xx=a
+        
+        
+        
+        
+        # concepts=rqdatac.get_concept_list(start_date=20241030, end_date=None)
+        # df=rqdatac.get_concept(list(concepts),start_date=None, end_date=None)
+        def func(row):
+            xx=rqdatac.get_price_change_rate(list(row.order_book_id), args.st, args.et).T
+            return xx.mean()
+        res=df.groupby(level=0).apply(func)
+        xx=a
+        
     ####factor_study 因子研究
     if args.task=='factor_study':   
         factors=rqdatac.get_factor_return(args.st, args.et, 
@@ -1790,6 +1800,60 @@ def main(args):
         # alphalens.tears.create_information_tear_sheet(factor_data, group_neutral, by_group, set_context=False)
         alphalens.tears.create_full_tear_sheet(factor_data)
         xx=1
+        
+    ####!!!!!!!top_study 通过研究top组合，反向推导近期最佳因子暴露
+    if args.task=='top_study':   
+        date_1=rqdatac.get_previous_trading_date(args.et,n=1,market='cn')
+        date_n=rqdatac.get_previous_trading_date(args.et,n=5,market='cn')
+        dates=rqdatac.get_trading_dates(date_n, date_1, market='cn')
+        cols_risk_factor=[
+            # 市场风险因子
+            'beta', 
+            'residual_volatility',
+        
+            # 价值/基本面因子
+            'book_to_price', 
+            'dividend_yield', 
+            'earnings_yield',
+        
+            # 质量/盈利因子
+            'earnings_quality', 
+            'profitability', 
+            'earnings_variability',
+        
+            # 增长/投资因子
+            'growth', 
+            'investment_quality',
+        
+            # 动量与反转因子
+            'momentum', 
+            'longterm_reversal',
+        
+            # 流动性/规模因子
+            'size', 
+            'mid_cap', 
+            'liquidity',
+        
+            # 杠杆因子
+            'leverage'
+        ]
+        res=[]
+        for date in tqdm(dates):   
+            df1=rqdatac.index_weights(order_book_id=args.id, date=date)
+            df2=rqdatac.get_price_change_rate(list(df1.index), date, date)
+            df2=df2.T
+            df2=df2.sort_values(list(df2.columns),ascending=False)
+            top=list(df2.head(100).index)
+            exposure=rqdatac.get_factor_exposure(top, 
+                                               date, date, factors = cols_risk_factor,
+                                               industry_mapping='citics_2019', model = 'v2')
+            res.append(exposure.mean())
+        res=pd.concat(res,axis=1)
+        xx=1
+        factors=rqdatac.get_factor_return(args.st, args.et, 
+                          factors= None, universe=args.universe,
+                          method='implicit',industry_mapping='citics_2019', model = 'v2')        
+        
         
     ####backtest1 500,1000,2000,wpg,hlg综合回测
     if args.task=='backtest1':   
@@ -3681,19 +3745,23 @@ if __name__ == '__main__':
     # args.f=5
     # args.file=r'data/米筐微盘股macd周频.xlsx'
     
+    # args.task='concept_study'
+    # args.st='20251028'
+    # args.et='20251029'    
+    
     # args.task='factor_study'
     # args.st='20100101'
     # args.et='20250707'    
     
-    args.task='factor_study2'
-    args.st='20250731' ##全周期，有数据的第一天
-    args.et='20251021'    
-    # args.universe='whole_market'
-    # args.universe='000300.XSHG'   ##300
-    # args.universe='000905.XSHG'   ##500
-    # args.universe='000906.XSHG'   ##800
-    # args.universe='000852.XSHG' ##1000
-    args.universe='399303.XSHE' ##国证2000
+    # args.task='factor_study2'
+    # args.st='20250731' ##全周期，有数据的第一天
+    # args.et='20251031'    
+    # # args.universe='whole_market'
+    # # args.universe='000300.XSHG'   ##300
+    # # args.universe='000905.XSHG'   ##500
+    # # args.universe='000906.XSHG'   ##800
+    # # args.universe='000852.XSHG' ##1000
+    # args.universe='399303.XSHE' ##国证2000
     
     
     # args.st='20070205'   ##牛市1，有数据的第一天
@@ -3801,8 +3869,8 @@ if __name__ == '__main__':
         'liquidity':-0.5,
         }
     args.top_n=100
-    args.st='20220901'
-    args.et='20240601'
+    args.st='20250622'
+    args.et='20251016'
     args.days=1   ##因子回看天数
     args.f=5   ##调仓频率
     args.file=r'data/增强等权周频.xlsx'
@@ -3810,19 +3878,20 @@ if __name__ == '__main__':
     
     # args.task='make_backtest_file3' ##自制因子
     # args.ids=[
-    #           '000852.XSHG',
-    #           '932000.INDX',
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           '399303.XSHE',
     #           # '866006.RI',
     #           ]
     
-    # args.factors=[
-    #     # 'size',
-    #     'beta',
-    #     # 'liquidity',
-    #     ]
-    # # args.st='20250819'
-    # args.st='20230901'
-    # args.et='20250919'
+    # args.factors={
+    #     'size':-0.5,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
+    #     }
+    # args.top_n=100
+    # args.st='20250622'
+    # args.et='20251016'
     # args.days=1   ##因子回看天数
     # args.f=5   ##调仓频率
     # args.file=r'data/增强等权周频.xlsx'
@@ -3867,23 +3936,31 @@ if __name__ == '__main__':
     # args.task='cb_iv'  ##计算可转债的隐含波动率
     # args.date='20250721'
     
+    # args.task='top_study'     
+    # args.id='399303.XSHE'
+    # args.et=20251021
+    # args.factors={
+    #     'size':-0.5,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
+    #     }
     
-    args.task='generate_target_pos'     
-    args.ids=[
-              # '000852.XSHG',
-              # '932000.INDX',
-              '399303.XSHE',
-              # '866006.RI',
-              ]
+    # args.task='generate_target_pos'     
+    # args.ids=[
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           '399303.XSHE',
+    #           # '866006.RI',
+    #           ]
     
-    args.factors={
-        'size':-0.5,
-        'beta':0.5,
-        'liquidity':-0.5,
-        }
-    args.top_n=100
-    args.et=pd.to_datetime('20251021')
-    args.money=158e4
+    # args.factors={
+    #     'size':-0.5,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
+    #     }
+    # args.top_n=100
+    # args.et=pd.to_datetime('20251021')
+    # args.money=158e4
     
     
     
