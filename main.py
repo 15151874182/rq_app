@@ -1664,29 +1664,115 @@ def main(args):
         
         xx=a
         
+
+    ####!!!!!!!future_study 跨期套利策略研究
+    if args.task=='future_study':  
+        print('future_study...')
+        dates=rqdatac.get_trading_dates(args.st, args.et, market='cn')
+        res=[] 
+        for date in tqdm(dates):    
+            futures=rqdatac.futures.get_contracts('IM', date)
+            future_near=futures[0]
+            future_forward=futures[2]
+            
+            basis_near=rqdatac.futures.get_basis(order_book_ids=future_near, 
+                                            start_date=date,end_date=date,
+                                            fields=None,frequency='1d')
+            basis_forward=rqdatac.futures.get_basis(order_book_ids=future_forward, 
+                                            start_date=date,end_date=date,
+                                            fields=None,frequency='1d')
+            # gap=basis_forward['settle_basis'].iloc[0]-basis_near['settle_basis'].iloc[0]
+            gap=basis_forward['basis'].iloc[0]-basis_near['basis'].iloc[0]
+            res.append([date,gap,
+                        basis_forward.index[0][0],basis_near.index[0][0],
+                        basis_forward['close'][0],basis_near['close'][0],
+                        basis_forward['settlement'][0],basis_near['settlement'][0],
+                        ])
+        res=pd.DataFrame(res,columns=['date','forward-near',
+                                      'forward','near',
+                                      'forward_close','near_close',
+                                      'forward_settlement','near_settlement',
+                                      ])
+        res=res.set_index('date')
+        res['forward-near-settlement']=res['forward_settlement']-res['near_settlement']
+        res['forward-near-settlement-M22']=res['forward-near-settlement'].rolling(22).mean()
+        res['forward-near'].describe(percentiles=[0.025, 0.5, 0.975])
+        res['forward-near'].plot()
+        x=a
+    ####!!!!!!!!cty_select 题材选股
+    if args.task=='cty_select':   
+        df=pd.read_csv('data/人形机器人优选股.csv')
+        df=df.iloc[:-1]
+        df['order_book_id']=[i for i in rqdatac.id_convert(list(df['id']),to=None)]
+        res=rqdatac.get_price(order_book_ids=list(df['order_book_id']), 
+                  start_date=20250301, 
+                  end_date=20251113, 
+                  frequency='1d', 
+                  fields=['close'], adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        res=res.reset_index()
+        res = res.pivot(index='date', columns='order_book_id', values='close')   
+        for col in res.columns:
+            res[col]=res[col]/res[col].iloc[0]
+        res['net']=np.mean(res,axis=1)
+        index=rqdatac.get_price(order_book_ids='980022.INDX', 
+                  start_date=20250301, 
+                  end_date=20251113, 
+                  frequency='1d', 
+                  fields=['close'], adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)    
         
-    ####concept_study 主题投资研究
+        
+        # index=rqdatac.get_price(order_book_ids='980022.INDX', 
+        #           start_date=20250901, 
+        #           end_date=20251106, 
+        #           frequency='1d', 
+        #           fields=['close'], adjust_type='pre', skip_suspended =False, market='cn', 
+        #           expect_df=True,time_slice=None)        
+        res['index']=list(index['close'])
+        res['index']=res['index']/res['index'].iloc[0]
+        Plot.plot_res(res,'',cols = ['net','index'],
+                                        start_time = res.index[0],
+                                        end_time=res.index[-1],
+                                        days = None,
+                                        maxmin=False)
+        res['net_return']=res['net']/res['net'].shift(1)-1
+        res['index_return']=res['index']/res['index'].shift(1)-1
+        print(res['net_return'].corr(res['index_return']))
+        
+        
+        xx=1
+        
+    ####!!!!!!!!concept_study 主题投资研究
     if args.task=='concept_study':   
-        res=[]
-        industrys=rqdatac.get_industry_mapping(source='citics', date=None, market='cn')
-        for industry in tqdm(list(industrys['third_industry_name'])):
-            df=rqdatac.get_industry(industry, source='citics', date=None, market='cn')
-            if df:
-                xx=rqdatac.get_price_change_rate(df, args.st, args.et).T
-                res.append([industry,xx.mean()[0],xx.mean()[1]])
-        res=pd.DataFrame(res)
-        xx=a
+        # res=[]
+        # industrys=rqdatac.get_industry_mapping(source='citics', date=None, market='cn')
+        # for industry in tqdm(list(industrys['third_industry_name'])):
+        #     df=rqdatac.get_industry(industry, source='citics', date=None, market='cn')
+        #     if df:
+        #         xx=rqdatac.get_price_change_rate(df, args.st, args.et).T
+        #         res.append([industry,xx.mean()[0],xx.mean()[1]])
+        # res=pd.DataFrame(res)
+        # xx=a
         
-        
-        
-        
-        # concepts=rqdatac.get_concept_list(start_date=20241030, end_date=None)
+        # concepts=rqdatac.get_concept_list(start_date=None, end_date=None)
         # df=rqdatac.get_concept(list(concepts),start_date=None, end_date=None)
-        def func(row):
-            xx=rqdatac.get_price_change_rate(list(row.order_book_id), args.st, args.et).T
-            return xx.mean()
-        res=df.groupby(level=0).apply(func)
-        xx=a
+        df=rqdatac.get_concept(['机器人执行器'],start_date=None, end_date=None)
+        # df=rqdatac.get_concept(['人形机器人'],start_date=None, end_date=None)
+        ids=list(df['order_book_id'])
+        beta=rqdatac.get_factor_exposure(ids,20250101,20251105,factors=['beta'],
+                                              industry_mapping='citics_2019', model = 'v2')
+        beta=beta.reset_index()
+        res=beta.groupby('order_book_id')['beta'].mean()
+        res=res.sort_values(ascending=False)
+        res=res.reset_index()
+        res['name']=[i.symbol for i in rqdatac.instruments(list(res['order_book_id']), market='cn')]
+        xx=1
+        # def func(row):
+        #     xx=rqdatac.get_price_change_rate(list(row.order_book_id), args.st, args.et).T
+        #     return xx.mean()
+        # res=df.groupby(level=0).apply(func)
+        # xx=a
         
     ####factor_study 因子研究
     if args.task=='factor_study':   
@@ -3745,6 +3831,12 @@ if __name__ == '__main__':
     # args.f=5
     # args.file=r'data/米筐微盘股macd周频.xlsx'
     
+    args.task='future_study'
+    args.st=20220901
+    args.et=20251118
+    
+    # args.task='cty_select'
+    
     # args.task='concept_study'
     # args.st='20251028'
     # args.et='20251029'    
@@ -3754,13 +3846,13 @@ if __name__ == '__main__':
     # args.et='20250707'    
     
     # args.task='factor_study2'
-    # args.st='20250731' ##全周期，有数据的第一天
-    # args.et='20251031'    
-    # # args.universe='whole_market'
-    # # args.universe='000300.XSHG'   ##300
-    # # args.universe='000905.XSHG'   ##500
-    # # args.universe='000906.XSHG'   ##800
-    # # args.universe='000852.XSHG' ##1000
+    # args.st='20250101' ##全周期，有数据的第一天
+    # args.et='20251111'    
+    # args.universe='whole_market'
+    # args.universe='000300.XSHG'   ##300
+    # args.universe='000905.XSHG'   ##500
+    # args.universe='000906.XSHG'   ##800
+    # args.universe='000852.XSHG' ##1000
     # args.universe='399303.XSHE' ##国证2000
     
     
@@ -3855,7 +3947,29 @@ if __name__ == '__main__':
     
     
     
-    args.task='make_backtest_file1'
+    # args.task='make_backtest_file1'
+    # args.ids=[
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           # '399303.XSHE',
+    #           '000985.XSHG',
+    #           # '866006.RI',
+    #           ]
+    
+    # args.factors={
+    #     'size':-0.5,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
+    #     }
+    # args.top_n=100
+    # args.st='20180126'
+    # args.et='20251016'
+    # args.days=1   ##因子回看天数
+    # args.f=5   ##调仓频率
+    # args.file=r'data/增强等权周频.xlsx'
+    
+    
+    args.task='make_backtest_file3' ##自制因子
     args.ids=[
               # '000852.XSHG',
               # '932000.INDX',
@@ -3869,32 +3983,11 @@ if __name__ == '__main__':
         'liquidity':-0.5,
         }
     args.top_n=100
-    args.st='20250622'
-    args.et='20251016'
+    args.st='20180126'
+    args.et='20190103'
     args.days=1   ##因子回看天数
     args.f=5   ##调仓频率
     args.file=r'data/增强等权周频.xlsx'
-    
-    
-    # args.task='make_backtest_file3' ##自制因子
-    # args.ids=[
-    #           # '000852.XSHG',
-    #           # '932000.INDX',
-    #           '399303.XSHE',
-    #           # '866006.RI',
-    #           ]
-    
-    # args.factors={
-    #     'size':-0.5,
-    #     'beta':0.5,
-    #     'liquidity':-0.5,
-    #     }
-    # args.top_n=100
-    # args.st='20250622'
-    # args.et='20251016'
-    # args.days=1   ##因子回看天数
-    # args.f=5   ##调仓频率
-    # args.file=r'data/增强等权周频.xlsx'
     
     
     # args.task='backtest'
