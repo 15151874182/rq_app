@@ -176,13 +176,13 @@ def main(args):
             chosen=set(res.iloc[:args.top_n].index)
             
             
-            weights=weights[weights['order_book_id'].isin(chosen)]
-            
-            weights.columns=['TICKER','TARGET_WEIGHT']
-            weights['TRADE_DT']=date.strftime('%Y%m%d')
-            weights['NAME']=[i.symbol for i in rqdatac.instruments(list(weights['TICKER']), market='cn')]
-            weights=weights[['TRADE_DT','TICKER','NAME','TARGET_WEIGHT']]
+            weights=weights[weights['id'].isin(chosen)]
+            weights.columns=['TICKER']
+            weights['TRADE_DT']=date
+            weights['NAME']=weights['TICKER'].apply(lambda id:xtdata.get_instrument_detail(id)['InstrumentName'])
+            weights=weights[['TRADE_DT','TICKER','NAME']]
             weights['TARGET_WEIGHT']=1/len(weights)
+            weights=weights.reset_index()
             inputs.append(weights)
         inputs=pd.concat(inputs,axis=0)
         with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
