@@ -43,14 +43,16 @@ def main(args):
         
         weights['close']=weights['id'].apply(lambda id: xtdata.get_instrument_detail(id)['PreClose'])
         # weights['floatvolume']=weights['id'].apply(lambda id: xtdata.get_instrument_detail(id)['FloatVolume'])
-        weights['floatvolume']=weights['id'].apply(lambda id: xtdata.get_instrument_detail(id)['TotalVolume'])
-        weights['size']=round(weights['close']*weights['floatvolume']/1e8,3)
+        weights['TotalVolume']=weights['id'].apply(lambda id: xtdata.get_instrument_detail(id)['TotalVolume'])
+        weights['qmt_size']=round(weights['close']*weights['TotalVolume']/1e8,3)
+        weights=weights.set_index('id')
         
         factor=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
                                            args.et, args.et, factors = ['size'],
                                            industry_mapping='citics_2019', model = 'v2')
-        
         size_sort=factor.sort_values('size',ascending=True)
+        size_sort.index = size_sort.index.get_level_values(1)
+        
         size_sort=size_sort.reset_index()
         # def callback(data):
         #     print(data)
@@ -182,7 +184,6 @@ def main(args):
             weights['NAME']=weights['TICKER'].apply(lambda id:xtdata.get_instrument_detail(id)['InstrumentName'])
             weights=weights[['TRADE_DT','TICKER','NAME']]
             weights['TARGET_WEIGHT']=1/len(weights)
-            weights=weights.reset_index()
             inputs.append(weights)
         inputs=pd.concat(inputs,axis=0)
         with pd.ExcelWriter(args.file, engine='xlsxwriter') as writer:
@@ -199,31 +200,31 @@ if __name__ == '__main__':
     ####入参
     
     ####常用指数
-    # args.task='compare_rq_cty_size_factor'
-    # args.et=20250915
+    args.task='compare_rq_cty_size_factor'
+    args.et=20251205
     
     # args.task='compare_rq_cty_liquidity_factor'
     # args.et=20250915
     
-    args.task='make_backtest_file3' ##自制因子
-    args.ids=[
-              # '000852.XSHG',
-              # '932000.INDX',
-              # '399303.XSHE',
-              '国证2000'
-              # '866006.RI',
-              ]
+    # args.task='make_backtest_file3' ##自制因子
+    # args.ids=[
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           # '399303.XSHE',
+    #           '国证2000'
+    #           # '866006.RI',
+    #           ]
     
-    args.factors={
-        'size':-0.5,
-        'beta':0.5,
-        'liquidity':-0.5,
-        }
-    args.top_n=100
-    args.st='20240923'
-    args.et='20251016'
-    args.days=1   ##因子回看天数
-    args.f=5   ##调仓频率
-    args.file=r'data/增强等权周频.xlsx'
+    # args.factors={
+    #     'size':-0.5,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
+    #     }
+    # args.top_n=100
+    # args.st='20240923'
+    # args.et='20251016'
+    # args.days=1   ##因子回看天数
+    # args.f=5   ##调仓频率
+    # args.file=r'data/增强等权周频.xlsx'
     
     main(args)

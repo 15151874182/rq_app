@@ -57,11 +57,11 @@ def main(args):
         weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
         
         #过滤被立案的
-        announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20240101',args.et)
-        cc=announcement[announcement['title'].str.contains('立案')]
-        cc=cc.reset_index()
-        cc=set(cc['order_book_id'])
-        weights=weights[~weights['order_book_id'].isin(cc)]        
+        # announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20240101',args.et)
+        # cc=announcement[announcement['title'].str.contains('立案')]
+        # cc=cc.reset_index()
+        # cc=set(cc['order_book_id'])
+        # weights=weights[~weights['order_book_id'].isin(cc)]        
         
         exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
                                            args.et, args.et, factors = list(args.factors.keys()),
@@ -118,6 +118,157 @@ def main(args):
         print('卖出:',sell_money)
         print('卖出笔数:',len(sell))
         
+        
+        now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
+        path=f'./DFCF_csv/篮子/目标篮子_{now}.csv'  
+        
+        res=res[['证券代码', '买卖方向', '买卖数量','买卖价格']]  
+        res.columns=['代码', '交易方向', '数量','委托价格']      
+        res['代码']=res['代码'].apply(lambda x:x.split('.')[0])
+        res['交易方向']=res['交易方向'].apply(lambda x:1 if x=='买入' else 2)
+        res['权重']=np.nan
+        # res['委托价格']=np.nan
+        res['基准价格']=np.nan
+        
+        res.to_csv(path,index=False)
+        print(f'save to {path}')
+        
+    ####!!!!!!!generate_target_pos2 (米筐风险模型不能用的情况)根据任意池子+任意因子等权生成dfcf目标持仓
+    if args.task=='generate_target_pos2':  
+        print('generate_target_pos2...')
+        import statsmodels.formula.api as smf
+        from scipy.stats.mstats import winsorize
+        from sklearn.preprocessing import StandardScaler
+        
+        weights=[]
+        for id in args.ids:
+            part=rqdatac.index_weights(order_book_id=id, date=args.et)
+            weights.append(part)
+        weights=pd.concat(weights)
+        weights=weights.reset_index()
+        weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
+        
+        ###########################beta复现
+        date_252=rqdatac.get_previous_trading_date(args.et,n=252,market='cn')
+        wpg=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
+                  start_date=date_252, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        hs300=rqdatac.get_price(
+                  order_book_ids='000300.XSHG', 
+                  start_date=date_252, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)
+        
+           
+        hs300['return']=hs300['close']/hs300['close'].shift(1)-1
+        hs300=hs300.bfill()
+        hs300.index = hs300.index.get_level_values(1)
+        def func(df,hs300):
+            df.index = df.index.get_level_values(1)
+            df['return']=df['close']/df['close'].shift(1)-1
+            df=df.bfill()
+            res=df[['return']].join(hs300[['return']], lsuffix='_wpg', rsuffix='_hs300')
+            
+            # 公式接口：y ~ x（因变量~自变量，默认添加截距项）
+            model_ols = smf.ols(formula='return_wpg ~ return_hs300', data=res)
+            result_ols = model_ols.fit()
+            beta=result_ols.params.iloc[-1]
+            
+            return beta
+        
+        df=wpg.groupby(level=0).apply(func,hs300)
+        df=pd.DataFrame(df,columns=['beta'])
+        df['beta_winsorized'] = winsorize(df['beta'],limits=(0.03, 0.03))  # 上下截断比例：下5%和上5%
+        df['beta_winsorized_01']=(df['beta_winsorized']-df['beta_winsorized'].min()) / (df['beta_winsorized'].max()-df['beta_winsorized'].min())
+        
+        ###########################size复现
+        shares=rqdatac.get_shares(list(weights['order_book_id']), start_date=args.et, end_date=args.et, fields=None, market='cn', expect_df=True)['total_a'] 
+        shares.index = shares.index.get_level_values(0)
+
+        close=rqdatac.get_price(order_book_ids=list(weights['order_book_id']), 
+                  start_date=args.et, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='none', skip_suspended =False, market='cn',  ##要不复权的价格！！！
+                  expect_df=True,time_slice=None)['close']
+        close.index = close.index.get_level_values(0)
+        df2=weights.set_index('order_book_id')
+        shares = shares.to_frame(name='total_share') 
+        close = close.to_frame(name='close') 
+        df2=df2.join(shares).join(close)
+        
+        df2['market_value']=df2['close']*df2['total_share'] ##总市值
+        df2['size_winsorized'] = winsorize(df2['market_value'],limits=(0.03, 0.03))  # 上下截断比例：下5%和上5%
+        df2['size_winsorized_01']=(df2['size_winsorized']-df2['size_winsorized'].min()) / (df2['size_winsorized'].max()-df2['size_winsorized'].min())
+        
+        ############################liquidity复现
+        turnover=rqdatac.get_turnover_rate(list(weights['order_book_id']), 
+                                           start_date=args.et, end_date=args.et, 
+                                           fields=None,expect_df=True)
+        turnover.index = turnover.index.get_level_values(0)
+        turnover = turnover[~(turnover == 0).all(axis=1)]
+        turnover['liquidity']=0.35*turnover['week']+0.35*turnover['month']+0.3*turnover['year']
+        turnover['liquidity_winsorized'] = winsorize(turnover['liquidity'],limits=(0.03, 0.03))  # 上下截断比例：下5%和上5%
+        turnover['liquidity_winsorized_01']=(turnover['liquidity_winsorized']-turnover['liquidity_winsorized'].min()) / (turnover['liquidity_winsorized'].max()-turnover['liquidity_winsorized'].min())
+        
+        res=df[['beta_winsorized_01']].join(df2[['size_winsorized_01']]).join(turnover[['liquidity_winsorized_01']])
+        res.columns=['beta','size','liquidity']
+        # 计算综合评分（值越高越符合目标）
+        res['score']=0
+        for factor in list(args.factors.keys()):
+            res['score']+=res[factor] *args.factors[factor]
+        res=res.sort_values('score',ascending=False)
+        chosen=set(res.iloc[:args.top_n].index)
+        
+        df=weights[weights['order_book_id'].isin(chosen)]
+        number=[]
+        for id in args.ids:   ##成分股占比监测
+            part=rqdatac.index_weights(order_book_id=id, date=args.et)
+            n=len(df[df['order_book_id'].isin(list(part.index))])
+            number.append([id,n])
+        print(number)
+        
+        
+        df.columns=['id','weight']
+        df['weight']=1/len(df) ##重新计算权重
+        df['买卖日期']=args.et.strftime('%Y-%m-%d')
+        df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
+        df['name']=[i.symbol for i in rqdatac.instruments(list(df['id']), market='cn')]
+        df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['id']), 
+                  start_date=args.et, 
+                  end_date=args.et, 
+                  frequency='1d', 
+                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+                  expect_df=True,time_slice=None)['close'])   
+        each=args.money/len(df)
+        df['买卖数量']=df['买卖价格'].apply(lambda close:int(each//(close*100)*100))
+        df.loc[(df['证券代码'].str.startswith('688')) & (df['买卖数量'] == 100), '买卖数量'] = 200 ##科创板至少200股
+        df['买卖方向']='买入'
+        res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
+        res=res[res['买卖数量']!=0] ##去掉价格过高，分配不到100股的票
+        money=sum(res['买卖价格']*res['买卖数量'])
+        
+        buy=res[res['买卖方向']=='买入']
+        if len(buy)!=0:
+            buy_money=sum(buy['买卖价格']*buy['买卖数量'])
+        else:
+            buy_money=0
+            
+        sell=res[res['买卖方向']=='卖出']
+        if len(sell)!=0:
+            sell_money=sum(sell['买卖价格']*sell['买卖数量'])
+        else:
+            sell_money=0        
+        print('总数:',money)
+        print('买入:',buy_money)
+        print('买入笔数:',len(buy))
+        print('卖出:',sell_money)
+        print('卖出笔数:',len(sell))
         
         now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
         path=f'./DFCF_csv/篮子/目标篮子_{now}.csv'  
@@ -385,9 +536,9 @@ if __name__ == '__main__':
     # args.task='make_order'
     
     args.task='basis_detect'
-    args.id='IM2409'
-    args.st=20240101
-    args.et=20240901
+    args.id='IM2609'
+    args.st=20250101
+    args.et=20260112
     
     # args.task='adjust_pos'
     # args.hold_pos='DFCF_csv/持仓/positions.csv'
@@ -399,8 +550,8 @@ if __name__ == '__main__':
     # args.ids=[
     #           # '000852.XSHG',
     #           # '932000.INDX',
-    #           '399303.XSHE',
-    #           # '866006.RI',
+    #           # '399303.XSHE',
+    #           '866006.RI',
     #           ]
     
     # args.factors={
@@ -408,12 +559,29 @@ if __name__ == '__main__':
     #     'beta':0.5,
     #     'liquidity':-0.5,
     #     }
-    # args.top_n=100
-    # args.et=pd.to_datetime('20251028')
-    # args.money=158e4
+    # args.top_n=150
+    # args.et=pd.to_datetime('20251210')
+    # args.money=155e4
+    
+    # args.task='generate_target_pos2'     ###不依赖付费风险模型
+    # args.ids=[
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           # '399303.XSHE',
+    #           '866006.RI',
+    #           ]
+    
+    # args.factors={
+    #     'size':-0.5,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
+    #     }
+    # args.top_n=150
+    # args.et=pd.to_datetime('20251211')
+    # args.money=190e4
 
     # args.task='trade_log_to_pms'     
-    # args.trade_log='DFCF_csv/成交/主观成交25-11-07.csv'
+    # args.trade_log='DFCF_csv/成交/execution_report.csv'
     
     # args.task='trade_log_to_pms_real'       ##实盘版！！
     # args.trade_log='DFCF_csv/成交/主观成交25-11-07.csv'

@@ -67,7 +67,10 @@ zz1000['future23_return']=zz1000['close']/zz1000['prev_settlement']-1
 xx['future23_return']=zz1000['future23_return']
 xx.loc[zz1000.index[0],'future23_return']=0
 # xx['port-future23_return']=xx['portfolio_return']*0.5-xx['future23_return']*0.5
-xx['port-future23_return']=xx['portfolio_return']*0.545-xx['future23_return']*0.454
+# xx['port-future23_return']=xx['portfolio_return']*0.545-xx['future23_return']*0.454
+# xx['port-future23_return']=(xx['portfolio_return']-xx['future23_return'])/1.2
+xx['port-future23_return']=(xx['portfolio_return']*1.1-xx['future23_return'])/1.3
+# xx['port-future23_return']=(xx['portfolio_return']*0.9-xx['future23_return'])/1.1
 xx['port-future23_net']=list(Convert.returns_to_net(xx['port-future23_return']))
 print(xx['portfolio_return'].corr(xx['future23_return']))
 Metrics.print_metrics(xx['port-future23_return'],xx.index,0.017)
