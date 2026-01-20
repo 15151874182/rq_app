@@ -57,15 +57,19 @@ def main(args):
         weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
         
         #过滤被立案的
-        # announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20240101',args.et)
-        # cc=announcement[announcement['title'].str.contains('立案')]
-        # cc=cc.reset_index()
-        # cc=set(cc['order_book_id'])
-        # weights=weights[~weights['order_book_id'].isin(cc)]        
+        announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20250101',args.et)
+        cc=announcement[announcement['title'].str.contains('立案')]
+        cc=cc.reset_index()
+        cc=set(cc['order_book_id'])
+        weights=weights[~weights['order_book_id'].isin(cc)]        
         
+        ###剔除夕阳行业版本
         exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
-                                           args.et, args.et, factors = list(args.factors.keys()),
+                                           args.et, args.et, factors = None,
+                                           # date_1, date_1, factors = list(args.factors.keys()),
                                            industry_mapping='citics_2019', model = 'v2')
+        for col in ['建材','建筑','房地产','纺织服装','综合']: ##去掉这些夕阳行业
+            exposure = exposure[exposure[col] != 1]
         # 计算综合评分（值越高越符合目标）
         exposure['score']=0
         for factor in list(args.factors.keys()):
@@ -535,10 +539,10 @@ if __name__ == '__main__':
 
     # args.task='make_order'
     
-    args.task='basis_detect'
-    args.id='IM2609'
-    args.st=20250101
-    args.et=20260112
+    # args.task='basis_detect'
+    # args.id='IM2606'
+    # args.st=20250101
+    # args.et=20260119
     
     # args.task='adjust_pos'
     # args.hold_pos='DFCF_csv/持仓/positions.csv'
@@ -546,22 +550,22 @@ if __name__ == '__main__':
     # args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
     # args.et='2025-10-29'
     
-    # args.task='generate_target_pos'     
-    # args.ids=[
-    #           # '000852.XSHG',
-    #           # '932000.INDX',
-    #           # '399303.XSHE',
-    #           '866006.RI',
-    #           ]
+    args.task='generate_target_pos'     
+    args.ids=[
+              # '000852.XSHG',
+              # '932000.INDX',
+              # '399303.XSHE',
+              '866006.RI',
+              ]
     
-    # args.factors={
-    #     'size':-0.5,
-    #     'beta':0.5,
-    #     'liquidity':-0.5,
-    #     }
-    # args.top_n=150
-    # args.et=pd.to_datetime('20251210')
-    # args.money=155e4
+    args.factors={
+        'size':-0.5,
+        'beta':0.5,
+        'liquidity':-0.5,
+        }
+    args.top_n=120
+    args.et=pd.to_datetime('20260120')
+    args.money=180e4
     
     # args.task='generate_target_pos2'     ###不依赖付费风险模型
     # args.ids=[
