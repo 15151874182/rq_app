@@ -44,54 +44,47 @@ np.random.seed(0)
 
 def main(args):
 
-    ####!!!!!!!generate_target_pos 根据任意池子+任意因子等权生成dfcf目标持仓
+    ####!!!!!!!generate_target_pos 百榕定制版，1000+2000+微盘分别，生成ATX目标持仓
     if args.task=='generate_target_pos':  
         print('generate_target_pos...')
         
-        weights=[]
-        for id in args.ids:
-            part=rqdatac.index_weights(order_book_id=id, date=args.et)
-            weights.append(part)
-        weights=pd.concat(weights)
-        weights=weights.reset_index()
-        weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
-        
-        #过滤被立案的
-        announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20250101',args.et)
-        cc=announcement[announcement['title'].str.contains('立案')]
-        cc=cc.reset_index()
-        cc=set(cc['order_book_id'])
-        weights=weights[~weights['order_book_id'].isin(cc)]        
-        
-        ###剔除夕阳行业版本
-        exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
-                                           args.et, args.et, factors = None,
-                                           # date_1, date_1, factors = list(args.factors.keys()),
-                                           industry_mapping='citics_2019', model = 'v2')
-        for col in ['建材','建筑','房地产','纺织服装','综合']: ##去掉这些夕阳行业
-            exposure = exposure[exposure[col] != 1]
-        # 计算综合评分（值越高越符合目标）
-        exposure['score']=0
-        for factor in list(args.factors.keys()):
-            exposure['score']+=exposure[factor] *args.factors[factor]
+        df=[]
+        dic={'000852.XSHG':80,'932000.INDX':120,'866006.RI':120}
+        for id in dic.keys():
+            weights=rqdatac.index_weights(order_book_id=id, date=args.et)
+            weights=weights.reset_index()
             
-        exposure=exposure.sort_values('score',ascending=False)
-        chosen=set(exposure.iloc[:args.top_n].index.get_level_values(1))
-        df=weights[weights['order_book_id'].isin(chosen)]
-        number=[]
-        for id in args.ids:   ##成分股占比监测
-            part=rqdatac.index_weights(order_book_id=id, date=args.et)
-            n=len(df[df['order_book_id'].isin(list(part.index))])
-            number.append([id,n])
-        print(number)
+            #过滤被立案的
+            announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20250101',args.et)
+            cc=announcement[announcement['title'].str.contains('立案')]
+            cc=cc.reset_index()
+            cc=set(cc['order_book_id'])
+            weights=weights[~weights['order_book_id'].isin(cc)]        
+            
+            ###剔除夕阳行业版本
+            exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
+                                               args.et, args.et, factors = None,
+                                               # date_1, date_1, factors = list(args.factors.keys()),
+                                               industry_mapping='citics_2019', model = 'v2')
+            for col in ['建材','建筑','房地产','纺织服装','综合']: ##去掉这些夕阳行业
+                exposure = exposure[exposure[col] != 1]
+            # 计算综合评分（值越高越符合目标）
+            exposure['score']=0
+            for factor in list(args.factors.keys()):
+                exposure['score']+=exposure[factor] *args.factors[factor]
+                
+            exposure=exposure.sort_values('score',ascending=False)
+            chosen=set(exposure.iloc[:dic[id]].index.get_level_values(1))
+            weights=weights[weights['order_book_id'].isin(chosen)]
+            df.append(weights)
+        df=pd.concat(df)
+        df = df.drop_duplicates(subset=['order_book_id'], keep='last')
         
-        
-        df.columns=['id','weight']
         df['weight']=1/len(df) ##重新计算权重
         df['买卖日期']=args.et.strftime('%Y-%m-%d')
-        df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to='normal')]
-        df['name']=[i.symbol for i in rqdatac.instruments(list(df['id']), market='cn')]
-        df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['id']), 
+        df['证券代码']=[i for i in rqdatac.id_convert(list(df['order_book_id']),to='normal')]
+        df['name']=[i.symbol for i in rqdatac.instruments(list(df['order_book_id']), market='cn')]
+        df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['order_book_id']), 
                   start_date=args.et, 
                   end_date=args.et, 
                   frequency='1d', 
@@ -102,6 +95,7 @@ def main(args):
         df.loc[(df['证券代码'].str.startswith('688')) & (df['买卖数量'] == 100), '买卖数量'] = 200 ##科创板至少200股
         df['买卖方向']='买入'
         res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
+        
         res=res[res['买卖数量']!=0] ##去掉价格过高，分配不到100股的票
         money=sum(res['买卖价格']*res['买卖数量'])
         
@@ -122,20 +116,14 @@ def main(args):
         print('卖出:',sell_money)
         print('卖出笔数:',len(sell))
         
-        
+        acc='共同target'  ##文件名和账户名有关联
         now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
-        path=f'./DFCF_csv/篮子/目标篮子_{now}.csv'  
-        
-        res=res[['证券代码', '买卖方向', '买卖数量','买卖价格']]  
-        res.columns=['代码', '交易方向', '数量','委托价格']      
-        res['代码']=res['代码'].apply(lambda x:x.split('.')[0])
-        res['交易方向']=res['交易方向'].apply(lambda x:1 if x=='买入' else 2)
-        res['权重']=np.nan
-        # res['委托价格']=np.nan
-        res['基准价格']=np.nan
-        
-        res.to_csv(path,index=False)
-        print(f'save to {path}')
+        path=f'./PMS_csv/{acc}_{now}.xlsx'  
+        with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
+            res.to_excel(writer, sheet_name='导入数据区', index=False)   
+            print(f'save to {path}')
+            res2=df[['order_book_id','name']]
+            res2.to_excel(writer, sheet_name='股票名清单', index=False)     
         
     ####!!!!!!!generate_target_pos2 (米筐风险模型不能用的情况)根据任意池子+任意因子等权生成dfcf目标持仓
     if args.task=='generate_target_pos2':  
@@ -550,22 +538,21 @@ if __name__ == '__main__':
     # args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
     # args.et='2025-10-29'
     
-    # args.task='generate_target_pos'     
-    # args.ids=[
-    #           # '000852.XSHG',
-    #           # '932000.INDX',
-    #           # '399303.XSHE',
-    #           '866006.RI',
-    #           ]
+    args.task='generate_target_pos'     
+    args.ids=[
+              # '000852.XSHG',
+              # '932000.INDX',
+              # '399303.XSHE',
+              '866006.RI',
+              ]
     
-    # args.factors={
-    #     'size':-0.5,
-    #     'beta':0.5,
-    #     'liquidity':-0.5,
-    #     }
-    # args.top_n=120
-    # args.et=pd.to_datetime('20260120')
-    # args.money=180e4
+    args.factors={
+        'size':-0.5,
+        'beta':0.5,
+        'liquidity':-0.5,
+        }
+    args.et=pd.to_datetime('20260120')
+    args.money=400e4
     
     # args.task='generate_target_pos2'     ###不依赖付费风险模型
     # args.ids=[
@@ -587,9 +574,9 @@ if __name__ == '__main__':
     # args.task='trade_log_to_pms'     
     # args.trade_log='DFCF_csv/成交/execution_report.csv'
     
-    args.task='trade_log_to_pms_real'       ##实盘版！！
-    args.trade_log='DFCF_csv/成交/2量化成交26-01-21.csv'
-    args.et='2026-01-21'
+    # args.task='trade_log_to_pms_real'       ##实盘版！！
+    # args.trade_log='DFCF_csv/成交/2量化成交26-01-21.csv'
+    # args.et='2026-01-21'
     
     # args.task='cty_select'
     # args.et=pd.to_datetime('20251106')

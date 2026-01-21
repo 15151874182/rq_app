@@ -1078,11 +1078,11 @@ def main(args):
         weights = weights.drop_duplicates(subset=['order_book_id'], keep='last')
         
         ##过滤被立案的
-        announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20240101',args.et)
-        cc=announcement[announcement['title'].str.contains('立案')]
-        cc=cc.reset_index()
-        cc=set(cc['order_book_id'])
-        weights=weights[~weights['order_book_id'].isin(cc)]        
+        # announcement=rqdatac.get_announcement(list(weights['order_book_id']),'20240101',args.et)
+        # cc=announcement[announcement['title'].str.contains('立案')]
+        # cc=cc.reset_index()
+        # cc=set(cc['order_book_id'])
+        # weights=weights[~weights['order_book_id'].isin(cc)]        
         
         exposure=rqdatac.get_factor_exposure(list(weights['order_book_id']), 
                                            args.et, args.et, factors = list(args.factors.keys()),
@@ -4190,10 +4190,10 @@ if __name__ == '__main__':
     args.task='make_backtest_file1'
     args.ids=[
               # '000852.XSHG',
-              # '932000.INDX',
+              '932000.INDX',
               # '399303.XSHE',
               # '000985.XSHG',
-              '866006.RI',
+              # '866006.RI',
               ]
     
     args.factors={
