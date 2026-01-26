@@ -288,70 +288,6 @@ def main(args):
         res.to_csv(path,index=False)
         print(f'save to {path}')
         
-    ####!!!!!!!adjust_pos 根据持仓篮子+目标篮子，生成调仓篮子
-    if args.task=='adjust_pos':  
-        print('adjust_pos...')
-        
-        hold_pos=pd.read_csv(args.hold_pos,encoding='gbk',dtype=str) ##现有持仓
-        target_pos=pd.read_csv(args.target_pos,dtype=str) ##目标持仓
-        
-        hold_pos['代码']=hold_pos['symbol'].apply(lambda x:x.split('.')[-1])
-        df=pd.merge(hold_pos[['代码','availableNow','lastPrice','marketValue','fpnl']],
-                    target_pos[['代码','数量','委托价格']],on='代码',how='outer')
-        df['lastPrice'].fillna(df['委托价格'], inplace=True)
-        del df['委托价格']
-        df.columns=['代码', '现有持仓', '价格', '市值', '盈亏', '目标持仓']
-        df=df.fillna(0)
-        df['调整股数']=df['目标持仓'].apply(int)-df['现有持仓'].apply(int)
-        df=df.sort_values('调整股数',ascending=True)
-        df['调整金额']=df['调整股数'].apply(float)*df['价格'].apply(float)
-        def func1(row):##保留所需行
-            if abs(row['调整金额'])>args.adjust_threshold: #调整幅度太小的，没有免5不划算，其它保留
-                return True
-            else:
-                return False
-        df['是否保留']=df.apply(func1,axis=1)
-            
-        res=df[df['是否保留']==True]
-        
-        def func2(row): ##处理科创板
-            if row['代码'].startswith('688') and row['调整股数']>0 and row['调整股数']<200: ##科创板
-                return 200
-            else:
-                return row['调整股数']
-        res['调整股数']=res.apply(func2,axis=1)
-        
-        money=res['调整金额'].apply(abs).sum()
-        buy=res[res['调整金额']>0]
-        if len(buy)!=0:
-            buy_money=buy['调整金额'].sum()
-        else:
-            buy_money=0
-            
-        sell=res[res['调整金额']<0]
-        if len(sell)!=0:
-            sell_money=sell['调整金额'].sum()
-        else:
-            sell_money=0        
-        print('总数:',money)
-        print('买入:',buy_money)
-        print('买入笔数:',len(buy))
-        print('卖出:',sell_money)
-        print('卖出笔数:',len(sell))
-        
-        
-        res['交易方向']=res['调整股数'].apply(lambda x:1 if x>0 else 2)
-        res['数量']=res['调整股数'].apply(abs)
-        res=res[['代码', '交易方向', '数量']]  
-        res['权重']=np.nan
-        res['委托价格']=np.nan
-        res['基准价格']=np.nan
-        
-        res=res.reset_index(drop=True)
-        path=f'./DFCF_csv/篮子/调仓篮子_{args.et}.csv'  
-        res.to_csv(path,index=False)
-        print(f'save to {path}')
-
     ####!!!!!!!trade_log_to_pms_real 实盘！！！！根据成交记录，变成pms追踪
     if args.task=='trade_log_to_pms_real':  
         print('trade_log_to_pms_real...')
@@ -377,6 +313,7 @@ def main(args):
             print(f'save to {path}')        
         
         xx=1
+    
     ####!!!!!!!adjust_pos 根据持仓篮子+目标篮子，生成调仓篮子
     if args.task=='adjust_pos':  
         print('adjust_pos...')

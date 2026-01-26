@@ -4441,11 +4441,11 @@ if __name__ == '__main__':
     # # args.w=5
     # args.t=60
     
-    # args.task='crowdedness_study3'
-    # args.st='20200101'
-    # args.et='20250609'
-    # args.w=5
-    # args.t=20
+    args.task='crowdedness_study3'
+    args.st='20200101'
+    args.et='20250609'
+    args.w=5
+    args.t=20
     
     # args.task='wpg_1000'
     # args.st='20200101'

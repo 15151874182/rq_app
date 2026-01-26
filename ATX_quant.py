@@ -125,6 +125,80 @@ def main(args):
             res2=df[['order_book_id','name']]
             res2.to_excel(writer, sheet_name='股票名清单', index=False)     
         
+
+    ####！！！！rq_wpg_adjust_ATX 根据ATX的实时监控.xlsx和米筐的微盘股目标仓位，生成csv，用于ATX 调仓
+    if args.task=='rq_wpg_adjust_ATX':  
+        print('rq_wpg_adjust_ATX...')
+        
+        df1=pd.read_excel(args.ATX_pos_file,dtype={'证券代码': str}) ##现有持仓
+        df2=pd.read_excel(args.pms_file, sheet_name='导入数据区') ##目标持仓
+        
+        df1['证券市场']=df1['交易市场'].apply(lambda x:'SZ' if x=='深交所' else 'SH')
+        df1['证券代码']=df1['证券代码']+'.'+df1['证券市场']
+        df1['当前拥股']=df1['持仓数量']
+        df1=df1[['证券代码','当前拥股']]
+        
+        # df2=df2.iloc[1:,:]
+        df2=df2[['证券代码','买卖数量']]
+        df2.columns=['证券代码','目标拥股']        
+        df=pd.merge(df1,df2,on='证券代码',how='outer')
+        df=df.fillna(0)
+        df['调整股数']=(df['目标拥股']-df['当前拥股']).apply(int)
+        df=df.sort_values('调整股数',ascending=True)
+        df=df[df['调整股数']!=0]
+        
+        def func(row):
+            if row['调整股数']>0 and row['调整股数']<200:
+                if row['证券代码'].startswith('688'): ##科创板
+                    return 200
+                else:
+                    return 100
+            else:
+                return row['调整股数']
+                
+        df['调整股数']=df.apply(func,axis=1)
+        
+        df['算法类型']='TWAP'
+        df['账户名称']=args.account
+        df['算法实例']='kf_twap_plus'
+        df['证券代码']=df['证券代码']
+        df['交易方向']=df['调整股数'].apply(lambda x:'买入' if x>0 else '卖出')
+        df['任务数量']=df['调整股数'].apply(abs)
+        df['开始时间']=args.start_time
+        df['结束时间']=args.end_time
+        # df['开始时间']='20241219T093000000'
+        # df['结束时间']='20241219T103000000'
+        df['涨跌停是否继续执行']='涨停不卖跌停不买'
+        df['过期后是否继续执行']='否'
+        df['其他参数']=np.nan
+        df['交易市场']=np.nan
+        
+        # xx=stock_info[['id','name']]
+        # xx.columns=['证券代码','证券名称']
+        # df=pd.merge(df,xx,on='证券代码',how='left')
+        df=df.reset_index()
+        
+        df.loc[(df['证券代码'].str.startswith('688')) & (df['调整股数'] == 100), '调整股数'] = 0 ##科创板至少200股,就不调整了
+        df.loc[(df['证券代码'].str.startswith('688')) & (df['调整股数'] == -100), '调整股数'] = 0 ##科创板至少200股,就不调整了
+        df=df[df['调整股数']!=0]
+        
+        columns=['算法类型',
+                '账户名称',
+                '算法实例',
+                '证券代码',
+                '任务数量',
+                '交易方向',
+                '开始时间',
+                '结束时间',
+                '涨跌停是否继续执行',
+                '过期后是否继续执行',
+                '其他参数',
+                '交易市场']
+        df=df[columns]
+        
+        df.to_csv(args.ATX_file,index=False)
+        print(f'save to {args.ATX_file}')
+
     ####!!!!!!!generate_target_pos2 (米筐风险模型不能用的情况)根据任意池子+任意因子等权生成dfcf目标持仓
     if args.task=='generate_target_pos2':  
         print('generate_target_pos2...')
@@ -464,95 +538,37 @@ def main(args):
         print('days:',len(basis))
         basis['basis'].plot()
 
-    ####!!!!!!!!cty_select 题材选股
-    if args.task=='cty_select':   
-        df=pd.read_csv('data/人形机器人优选股.csv')
-        df=df.iloc[:-1]
-        df['证券代码']=[i for i in rqdatac.id_convert(list(df['id']),to=None)]
-        df['weight']=1/len(df) ##重新计算权重
-        df['买卖日期']=args.et.strftime('%Y-%m-%d')
-        df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['证券代码']), 
-                  start_date=args.et, 
-                  end_date=args.et, 
-                  frequency='1d', 
-                  fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                  expect_df=True,time_slice=None)['close'])   
-        
-        each=args.money/len(df)
-        df['买卖数量']=df['买卖价格'].apply(lambda close:int(each//(close*100)*100))
-        df.loc[(df['证券代码'].str.startswith('688')) & (df['买卖数量'] == 100), '买卖数量'] = 200 ##科创板至少200股
-        df['买卖方向']='买入'
-        res=df[['买卖日期','证券代码', '买卖数量', '买卖价格', '买卖方向']]
-        res=res[res['买卖数量']!=0] ##去掉价格过高，分配不到100股的票
-        money=sum(res['买卖价格']*res['买卖数量'])
-        
-        buy=res[res['买卖方向']=='买入']
-        if len(buy)!=0:
-            buy_money=sum(buy['买卖价格']*buy['买卖数量'])
-        else:
-            buy_money=0
-            
-        sell=res[res['买卖方向']=='卖出']
-        if len(sell)!=0:
-            sell_money=sum(sell['买卖价格']*sell['买卖数量'])
-        else:
-            sell_money=0        
-        print('总数:',money)
-        print('买入:',buy_money)
-        print('买入笔数:',len(buy))
-        print('卖出:',sell_money)
-        print('卖出笔数:',len(sell))
-        
-        now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
-        path=f'./DFCF_csv/篮子/目标篮子_{now}.csv'  
-        
-        res=res[['证券代码', '买卖方向', '买卖数量','买卖价格']]  
-        res.columns=['代码', '交易方向', '数量','委托价格']      
-        res['代码']=res['代码'].apply(lambda x:x.split('.')[0])
-        res['交易方向']=res['交易方向'].apply(lambda x:1 if x=='买入' else 2)
-        res['权重']=np.nan
-        # res['委托价格']=np.nan
-        res['基准价格']=np.nan
-        
-        res.to_csv(path,index=False)
-        print(f'save to {path}')
-        
-        
-        xx=1
         
 if __name__ == '__main__':
     ####入参
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
 
-    # args.task='make_order'
+    # args.task='generate_target_pos'     
+    # args.ids=[
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           # '399303.XSHE',
+    #           '866006.RI',
+    #           ]
+    # args.factors={
+    #     'size':-0.5,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
+    #     }
+    # args.et=pd.to_datetime('20260120')
+    # args.money=400e4
     
-    # args.task='basis_detect'
-    # args.id='IM2609'
-    # args.st=20250101
-    # args.et=20260120
-    
-    # args.task='adjust_pos'
-    # args.hold_pos='DFCF_csv/持仓/positions.csv'
-    # args.target_pos='DFCF_csv/篮子/目标篮子_2025-10-28.csv'
-    # args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
-    # args.et='2025-10-29'
-    
-    args.task='generate_target_pos'     
-    args.ids=[
-              # '000852.XSHG',
-              # '932000.INDX',
-              # '399303.XSHE',
-              '866006.RI',
-              ]
-    
-    args.factors={
-        'size':-0.5,
-        'beta':0.5,
-        'liquidity':-0.5,
-        }
-    args.et=pd.to_datetime('20260120')
-    args.money=400e4
+    args.task='rq_wpg_adjust_ATX'
+    args.pms_file='PMS_csv/共同target_2026-01-20.xlsx' ##目标持仓
+    args.start_time='20260127T093000000'
+    args.end_time=  '20260127T093500000'  
+    args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'  ##现有持仓
+    args.ATX_file='ATX_csv/ATX_stock_2026-01_27百里挑一信用.csv'
+    args.account='百榕百里挑一稳健一号信用'
+    # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250901090843.xlsx'
+    # args.ATX_file='ATX_csv/ATX_stock_2025-09-01_绝对收益信用.csv'
+    # args.account='百榕全天候宏观对冲绝对收益信用'
     
     # args.task='generate_target_pos2'     ###不依赖付费风险模型
     # args.ids=[
