@@ -1612,6 +1612,21 @@ def main(args):
         
 
         xx=a
+
+    ####！！！！！！！！wpg_return_study 微盘股每日收益研究
+    if args.task=='wpg_return_study':   
+        wpg=rqdatac.get_price_change_rate('866006.RI', 
+                                              start_date=args.st, 
+                                              end_date=args.et, 
+                                             expect_df=True, market='cn')
+        # wpg['weekday'] = wpg.index.day_name()
+        # Thursday=wpg[wpg['weekday']=='Thursday']
+        
+        wpg['weekofyear'] = wpg.index.weekofyear
+        group1=wpg.groupby(['weekofyear'])['866006.RI'].mean()
+        group2=wpg.groupby(['weekofyear'])['866006.RI'].quantile(0.5)
+        x=a
+        
         
     ####wpg_hlg_return_study 微盘股和红利股每月收益研究
     if args.task=='wpg_hlg_return_study':   
@@ -2038,7 +2053,7 @@ def main(args):
         plt.tight_layout()  # 防止标签被截断
         plt.show()
         
-        xx=1
+        xx=a
         
     ####factor_study3 单因子研究
     if args.task=='factor_study3':   
@@ -3395,35 +3410,50 @@ def main(args):
 
     ####wpg_1000 wpg-1000涨幅，20天
     if args.task=='wpg_1000':   
-        date='20250527'
-        dates=rqdatac.get_trading_dates(start_date='20200101', end_date=date)
-        res=[]
         
-        for date in tqdm(dates):
-            dates2=rqdatac.get_trading_dates(start_date='20190101', end_date=date)
-            dates2=dates2[-20:]
-            wpg=rqdatac.get_price(order_book_ids='000002.XSHG', 
-                      start_date=dates2[0], 
-                      end_date=date, 
-                      frequency='1d', 
-                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                      expect_df=True,time_slice=None)  
-            hlg=rqdatac.get_price(order_book_ids='930930.INDX', 
-                      start_date=dates2[0], 
-                      end_date=date, 
-                      frequency='1d', 
-                      fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
-                      expect_df=True,time_slice=None)  
+        wpg_change=rqdatac.get_price_change_rate('866006.RI', 
+                                             start_date=args.st, end_date=args.et, 
+                                             expect_df=True, market='cn')
+        zz1000_change=rqdatac.get_price_change_rate('000852.XSHG', 
+                                             start_date=args.st, end_date=args.et, 
+                                             expect_df=True, market='cn')
+        res=wpg_change.join(zz1000_change)
+        res['dif']=res['866006.RI']-res['000852.XSHG']
+        res['dif21']=res['dif'].rolling(21).sum()
+        res=res.dropna()
+        res['dif21'].plot()
+        from scipy.stats import percentileofscore
+        res['crowdedness_percent'] = [percentileofscore(res['dif21'], v) for v in res['dif21']]#百分位越低，wpg相对1000涨幅越小，越有做中性的价值
+        xx=a
+        # date='20250527'
+        # dates=rqdatac.get_trading_dates(start_date='20200101', end_date=date)
+        # res=[]
+        
+        # for date in tqdm(dates):
+        #     dates2=rqdatac.get_trading_dates(start_date='20190101', end_date=date)
+        #     dates2=dates2[-20:]
+        #     wpg=rqdatac.get_price(order_book_ids='000002.XSHG', 
+        #               start_date=dates2[0], 
+        #               end_date=date, 
+        #               frequency='1d', 
+        #               fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+        #               expect_df=True,time_slice=None)  
+        #     hlg=rqdatac.get_price(order_book_ids='930930.INDX', 
+        #               start_date=dates2[0], 
+        #               end_date=date, 
+        #               frequency='1d', 
+        #               fields=None, adjust_type='pre', skip_suspended =False, market='cn', 
+        #               expect_df=True,time_slice=None)  
             
-            wpg_return30=wpg['close'].iloc[-1]/wpg['close'].iloc[0]-1
-            hlg_return30=hlg['close'].iloc[-1]/hlg['close'].iloc[0]-1
-            wpg_hlg_dif=wpg_return30-hlg_return30
-            res.append(wpg_hlg_dif)
+        #     wpg_return30=wpg['close'].iloc[-1]/wpg['close'].iloc[0]-1
+        #     hlg_return30=hlg['close'].iloc[-1]/hlg['close'].iloc[0]-1
+        #     wpg_hlg_dif=wpg_return30-hlg_return30
+        #     res.append(wpg_hlg_dif)
         
-        res=pd.DataFrame(res,columns=['wpg_hlg_dif'])
-        res = res.replace([-np.inf], np.nan).dropna()
-        res=res[res['wpg_hlg_dif']<0.5]
-        plt.plot(res['wpg_hlg_dif'])
+        # res=pd.DataFrame(res,columns=['wpg_hlg_dif'])
+        # res = res.replace([-np.inf], np.nan).dropna()
+        # res=res[res['wpg_hlg_dif']<0.5]
+        # plt.plot(res['wpg_hlg_dif'])
         
         
     ####a_hk A股-港股涨幅，20天
@@ -4087,7 +4117,7 @@ if __name__ == '__main__':
     
     # args.task='factor_study2'
     # args.st='20250101' ##全周期，有数据的第一天
-    # args.et='20251214'    
+    # args.et='20261231'    
     # # args.universe='whole_market'
     # # args.universe='000300.XSHG'   ##300
     # # args.universe='000905.XSHG'   ##500
@@ -4183,30 +4213,33 @@ if __name__ == '__main__':
     
     # args.task='wpg_hlg_return_study'
     # args.st='20170101'
-    # args.et='20251012'
+    # args.et='0251012'
+    
+    args.task='wpg_return_study'
+    args.st='20170101'
+    args.et='20251231'
     
     
+    # args.task='make_backtest_file1'
+    # args.ids=[
+    #           # '000852.XSHG',
+    #           # '932000.INDX',
+    #           # '399303.XSHE',
+    #           # '000985.XSHG',
+    #           '866006.RI',
+    #           ]
     
-    args.task='make_backtest_file1'
-    args.ids=[
-              # '000852.XSHG',
-              '932000.INDX',
-              # '399303.XSHE',
-              # '000985.XSHG',
-              # '866006.RI',
-              ]
-    
-    args.factors={
-        'size':-0.5,
-        'beta':0.5,
-        'liquidity':-0.5,
-        }
-    args.top_n=120
-    args.st='20250101'
-    args.et='20251208'
-    args.days=1   ##因子回看天数
-    args.f=5   ##调仓频率
-    args.file=r'data/增强等权周频.xlsx'
+    # args.factors={
+    #     'size':-0.5,
+    #     'beta':0.5,
+    #     'liquidity':-0.5,
+    #     }
+    # args.top_n=120
+    # args.st='20250101'
+    # args.et='20251208'
+    # args.days=1   ##因子回看天数
+    # args.f=5   ##调仓频率
+    # args.file=r'data/增强等权周频.xlsx'
     
     
     # args.task='make_backtest_file3' ##自制因子
@@ -4362,7 +4395,6 @@ if __name__ == '__main__':
     # args.ATX_file='ATX_csv/ATX_stock_2025-08-27_绝对收益信用.csv'
     # args.account='百榕全天候宏观对冲绝对收益信用'
     
-    
     # args.task='opt_wpg_hlg_bond'
     
     # args.task='wpg_IM_hedge'
@@ -4441,15 +4473,15 @@ if __name__ == '__main__':
     # # args.w=5
     # args.t=60
     
-    args.task='crowdedness_study3'
-    args.st='20200101'
-    args.et='20250609'
-    args.w=5
-    args.t=20
-    
-    # args.task='wpg_1000'
+    # args.task='crowdedness_study3'
     # args.st='20200101'
     # args.et='20250609'
+    # args.w=5
+    # args.t=20
+    
+    args.task='wpg_1000'
+    args.st=20180101
+    args.et=20260210
     
     # args.task='pick_st_sell'
     # args.ATX_pos_file='ATX_csv/持仓查询_20250508105218.xlsx'

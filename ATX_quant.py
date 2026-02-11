@@ -81,7 +81,7 @@ def main(args):
         df = df.drop_duplicates(subset=['order_book_id'], keep='last')
         
         df['weight']=1/len(df) ##重新计算权重
-        df['买卖日期']=args.et.strftime('%Y-%m-%d')
+        df['买卖日期']=args.et2.strftime('%Y-%m-%d')
         df['证券代码']=[i for i in rqdatac.id_convert(list(df['order_book_id']),to='normal')]
         df['name']=[i.symbol for i in rqdatac.instruments(list(df['order_book_id']), market='cn')]
         df['买卖价格']=list(rqdatac.get_price(order_book_ids=list(df['order_book_id']), 
@@ -116,15 +116,37 @@ def main(args):
         print('卖出:',sell_money)
         print('卖出笔数:',len(sell))
         
-        acc='共同target'  ##文件名和账户名有关联
-        now = args.et.strftime("%Y-%m-%d")##文件名和时间有关联
-        path=f'./PMS_csv/{acc}_{now}.xlsx'  
-        with pd.ExcelWriter(f'{path}', engine='xlsxwriter') as writer:
-            res.to_excel(writer, sheet_name='导入数据区', index=False)   
-            print(f'save to {path}')
-            res2=df[['order_book_id','name']]
-            res2.to_excel(writer, sheet_name='股票名清单', index=False)     
+        res['算法类型']='TWAP'
+        res['账户名称']=args.account
+        res['算法实例']='kf_twap_plus'
+        res['证券代码']=res['证券代码']
+        res['交易方向']=res['买卖方向']
+        res['任务数量']=res['买卖数量'].apply(abs)
+        res['开始时间']=args.start_time
+        res['结束时间']=args.end_time
+        res['涨跌停是否继续执行']='涨停不卖跌停不买'
+        res['过期后是否继续执行']='否'
+        res['其他参数']=np.nan
+        res['交易市场']=np.nan
         
+        res=res.reset_index()
+        
+        columns=['算法类型',
+                '账户名称',
+                '算法实例',
+                '证券代码',
+                '任务数量',
+                '交易方向',
+                '开始时间',
+                '结束时间',
+                '涨跌停是否继续执行',
+                '过期后是否继续执行',
+                '其他参数',
+                '交易市场']
+        res=res[columns]
+        
+        res.to_csv(args.ATX_file,index=False)
+        print(f'save to {args.ATX_file}')                
 
     ####！！！！rq_wpg_adjust_ATX 根据ATX的实时监控.xlsx和米筐的微盘股目标仓位，生成csv，用于ATX 调仓
     if args.task=='rq_wpg_adjust_ATX':  
@@ -173,9 +195,6 @@ def main(args):
         df['其他参数']=np.nan
         df['交易市场']=np.nan
         
-        # xx=stock_info[['id','name']]
-        # xx.columns=['证券代码','证券名称']
-        # df=pd.merge(df,xx,on='证券代码',how='left')
         df=df.reset_index()
         
         df.loc[(df['证券代码'].str.startswith('688')) & (df['调整股数'] == 100), '调整股数'] = 0 ##科创板至少200股,就不调整了
@@ -544,31 +563,30 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
 
-    # args.task='generate_target_pos'     
-    # args.ids=[
-    #           # '000852.XSHG',
-    #           # '932000.INDX',
-    #           # '399303.XSHE',
-    #           '866006.RI',
-    #           ]
-    # args.factors={
-    #     'size':-0.5,
-    #     'beta':0.5,
-    #     'liquidity':-0.5,
-    #     }
-    # args.et=pd.to_datetime('20260120')
-    # args.money=400e4
-    
-    args.task='rq_wpg_adjust_ATX'
-    args.pms_file='PMS_csv/共同target_2026-01-20.xlsx' ##目标持仓
+    args.task='generate_target_pos'     
+    args.factors={
+        'size':-0.5,
+        'beta':0.5,
+        'liquidity':-0.5,
+        }
+    args.et=pd.to_datetime('20260126') ##交易日前收盘日，eg周一交易，这里写周五
+    args.et2=pd.to_datetime('20260127') ##待交易日期，eg周一要买卖，写周一
+    args.money=400e4
     args.start_time='20260127T093000000'
     args.end_time=  '20260127T093500000'  
-    args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'  ##现有持仓
     args.ATX_file='ATX_csv/ATX_stock_2026-01_27百里挑一信用.csv'
     args.account='百榕百里挑一稳健一号信用'
-    # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250901090843.xlsx'
-    # args.ATX_file='ATX_csv/ATX_stock_2025-09-01_绝对收益信用.csv'
-    # args.account='百榕全天候宏观对冲绝对收益信用'
+    
+    # args.task='rq_wpg_adjust_ATX'
+    # args.pms_file='PMS_csv/共同target_2026-01-20.xlsx' ##目标持仓
+    # args.start_time='20260127T093000000'
+    # args.end_time=  '20260127T093500000'  
+    # args.ATX_pos_file='ATX_csv/持仓查询none.xlsx'  ##现有持仓
+    # args.ATX_file='ATX_csv/ATX_stock_2026-01_27百里挑一信用.csv'
+    # args.account='百榕百里挑一稳健一号信用'
+    # # args.ATX_pos_file='ATX_csv/全天候持仓查询_20250901090843.xlsx'
+    # # args.ATX_file='ATX_csv/ATX_stock_2025-09-01_绝对收益信用.csv'
+    # # args.account='百榕全天候宏观对冲绝对收益信用'
     
     # args.task='generate_target_pos2'     ###不依赖付费风险模型
     # args.ids=[

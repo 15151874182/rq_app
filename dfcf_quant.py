@@ -293,7 +293,7 @@ def main(args):
         print('trade_log_to_pms_real...')
         
         df=pd.read_csv(args.trade_log)
-        df=df[['createdAt','symbol','price','volume','side']]
+        df=df[['created_at','symbol','price','volume','side']]
         df.columns=['买卖日期','证券代码', '买卖价格', '买卖数量', '买卖方向']
         df['买卖日期']=args.et
         df['证券代码']=df['证券代码'].apply(lambda x:x.split('.')[1]+'.'+x.split('.')[0][:2])
@@ -322,9 +322,9 @@ def main(args):
         target_pos=pd.read_csv(args.target_pos,dtype=str) ##目标持仓
         
         hold_pos['代码']=hold_pos['symbol'].apply(lambda x:x.split('.')[-1])
-        df=pd.merge(hold_pos[['代码','availableNow','lastPrice','marketValue','fpnl']],
+        df=pd.merge(hold_pos[['代码','available_now(avl_now)','price','market_value(market_val)','fpnl']],
                     target_pos[['代码','数量','委托价格']],on='代码',how='outer')
-        df['lastPrice'].fillna(df['委托价格'], inplace=True)
+        df['price'].fillna(df['委托价格'], inplace=True)
         del df['委托价格']
         df.columns=['代码', '现有持仓', '价格', '市值', '盈亏', '目标持仓']
         df=df.fillna(0)
@@ -372,6 +372,76 @@ def main(args):
         res['权重']=np.nan
         res['委托价格']=np.nan
         res['基准价格']=np.nan
+        
+        ##去掉非量化组合篮子中的票eg三花、绿的这种
+        L=['601689','688017','003021','002472','603667','002896','300007',
+         '688160','300718','603119','002241','300432','300433','002048',
+         '002709','002050','300115','688676','601100','09880','002709']
+        res=res[~res['代码'].isin(L)]
+        
+        res=res.reset_index(drop=True)
+        path=f'./DFCF_csv/篮子/调仓篮子_{args.et}.csv'  
+        res.to_csv(path,index=False)
+        print(f'save to {path}')
+        
+    ####!!!!!!!clean_pos 根据持仓篮子+目标篮子，生成调仓篮子
+    if args.task=='clean_pos':  
+        print('clean_pos...')
+
+        hold_pos=pd.read_csv(args.hold_pos,encoding='gbk',dtype=str) ##现有持仓
+        target_pos=pd.DataFrame(columns=['代码', '交易方向', '数量', '委托价格', '权重', '基准价格'])
+        
+        hold_pos['代码']=hold_pos['symbol'].apply(lambda x:x.split('.')[-1])
+        df=pd.merge(hold_pos[['代码','available_now(avl_now)','price','market_value(market_val)','fpnl']],
+                    target_pos[['代码','数量','委托价格']],on='代码',how='outer')
+        del df['委托价格']
+        df.columns=['代码', '现有持仓', '价格', '市值', '盈亏', '目标持仓']
+        df=df.fillna(0)
+        df['调整股数']=df['目标持仓'].apply(int)-df['现有持仓'].apply(int)
+        df=df.sort_values('调整股数',ascending=True)
+        df['调整金额']=df['调整股数'].apply(float)*df['价格'].apply(float)
+            
+        res=df
+        
+        ##去掉非量化组合篮子中的票eg三花、绿的这种
+        L=['601689','688017','003021','002472','603667','002896','300007',
+         '688160','300718','603119','002241','300432','300433','002048',
+         '002709','002050','300115','688676','601100','09880','002709']
+        res=res[~res['代码'].isin(L)]
+        
+        def func2(row): ##处理科创板
+            if row['代码'].startswith('688') and row['调整股数']>0 and row['调整股数']<200: ##科创板
+                return 200
+            else:
+                return row['调整股数']
+        res['调整股数']=res.apply(func2,axis=1)
+        
+        money=res['调整金额'].apply(abs).sum()
+        buy=res[res['调整金额']>0]
+        if len(buy)!=0:
+            buy_money=buy['调整金额'].sum()
+        else:
+            buy_money=0
+            
+        sell=res[res['调整金额']<0]
+        if len(sell)!=0:
+            sell_money=sell['调整金额'].sum()
+        else:
+            sell_money=0        
+        print('总数:',money)
+        print('买入:',buy_money)
+        print('买入笔数:',len(buy))
+        print('卖出:',sell_money)
+        print('卖出笔数:',len(sell))
+        
+        
+        res['交易方向']=res['调整股数'].apply(lambda x:1 if x>0 else 2)
+        res['数量']=res['调整股数'].apply(abs)
+        res=res[['代码', '交易方向', '数量']]  
+        res['权重']=np.nan
+        res['委托价格']=np.nan
+        res['基准价格']=np.nan
+        
         
         res=res.reset_index(drop=True)
         path=f'./DFCF_csv/篮子/调仓篮子_{args.et}.csv'  
@@ -466,7 +536,23 @@ def main(args):
         res.to_csv(path,index=False)
         print(f'save to {path}')
         
+        xx=1
+
+    if args.task=='wpg_1000':   
         
+        wpg_change=rqdatac.get_price_change_rate('866006.RI', 
+                                             start_date=20180101, end_date=args.et, 
+                                             expect_df=True, market='cn')
+        zz1000_change=rqdatac.get_price_change_rate('000852.XSHG', 
+                                             start_date=20180101, end_date=args.et, 
+                                             expect_df=True, market='cn')
+        res=wpg_change.join(zz1000_change)
+        res['dif']=res['866006.RI']-res['000852.XSHG']
+        res['dif21']=res['dif'].rolling(21*3).sum()
+        res=res.dropna()
+        res['dif21'].plot()
+        from scipy.stats import percentileofscore
+        res['crowdedness_percent'] = [percentileofscore(res['dif21'], v) for v in res['dif21']]#百分位越低，wpg相对1000涨幅越小，越有做中性的价值
         xx=1
         
 if __name__ == '__main__':
@@ -476,16 +562,20 @@ if __name__ == '__main__':
 
     # args.task='make_order'
     
-    # args.task='basis_detect'
-    # args.id='IM2609'
-    # args.st=20250101
-    # args.et=20260120
+    args.task='basis_detect'
+    args.id='IM2609'
+    args.st=20250101
+    args.et=20260206
     
     # args.task='adjust_pos'
-    # args.hold_pos='DFCF_csv/持仓/positions.csv'
-    # args.target_pos='DFCF_csv/篮子/目标篮子_2025-10-28.csv'
+    # args.hold_pos='DFCF_csv/持仓/position.csv'
+    # args.target_pos='DFCF_csv/篮子/目标篮子_2026-02-04.csv'
     # args.adjust_threshold=1e4 ##调整金额小于阈值的就不调整了，因为不免5
-    # args.et='2025-10-29'
+    # args.et='2025-02-05'
+    
+    args.task='clean_pos'
+    args.hold_pos='DFCF_csv/持仓/position.csv'
+    args.et='2025-02-11'
     
     # args.task='generate_target_pos'     
     # args.ids=[
@@ -501,7 +591,7 @@ if __name__ == '__main__':
     #     'liquidity':-0.5,
     #     }
     # args.top_n=120
-    # args.et=pd.to_datetime('20260120')
+    # args.et=pd.to_datetime('20260204')
     # args.money=180e4
     
     # args.task='generate_target_pos2'     ###不依赖付费风险模型
@@ -524,9 +614,13 @@ if __name__ == '__main__':
     # args.task='trade_log_to_pms'     
     # args.trade_log='DFCF_csv/成交/execution_report.csv'
     
-    args.task='trade_log_to_pms_real'       ##实盘版！！
-    args.trade_log='DFCF_csv/成交/2量化成交26-01-21.csv'
-    args.et='2026-01-21'
+    # args.task='trade_log_to_pms_real'       ##实盘版！！
+    # args.trade_log='DFCF_csv/成交/量化成交26-02-05.csv'
+    # args.et='2026-02-05'
+
+    # args.task='wpg_1000'
+    # args.st=20180101
+    # args.et=20260129
     
     # args.task='cty_select'
     # args.et=pd.to_datetime('20251106')
